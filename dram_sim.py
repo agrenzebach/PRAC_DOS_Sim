@@ -250,6 +250,20 @@ class DRAMSimulator:
                 )
         return "\n".join(lines)
 
+    def csv_output(self) -> str:
+        """Output metrics in CSV format: Row,Activations,Alerts,RFMs,AlertTime"""
+        lines = []
+        for r in range(self.rows):
+            if self.rfm_freq_s > 0:
+                lines.append(
+                    f"{r},{self.total_activations_per_row[r]},{self.alerts_issued[r]},{self.rfm_issued[r]},{self.total_alert_time_s[r] / 1e6}"
+                )
+            else:
+                lines.append(
+                    f"{r},{self.total_activations_per_row[r]},{self.alerts_issued[r]},0,{self.total_alert_time_s[r] / 1e6}"
+                )
+        return "\n".join(lines)
+
 
 def build_arg_parser():
     p = argparse.ArgumentParser(
@@ -274,6 +288,10 @@ def build_arg_parser():
     p.add_argument(
         "--trfcrfm", type=str, default="0",
         help="tRFC RFM time duration consumed when RFM is issued (e.g., '100ns', '1us'). Use '0' for no time consumption. Default is 0."
+    )
+    p.add_argument(
+        "--csv", action="store_true",
+        help="Output results in CSV format: Row,Activations,Alerts,RFMs,AlertTime"
     )
     return p
 
@@ -301,7 +319,10 @@ def main(argv=None):
         trfcrfm_s=trfcrfm_s,
     )
     sim.run()
-    print(sim.summary())
+    if args.csv:
+        print(sim.csv_output())
+    else:
+        print(sim.summary())
     return 0
 
 
