@@ -305,12 +305,12 @@ class DRAMSimulator:
         
         if self.rows == 1:
             # Single row - always include RFMs count (both proactive and alert RFMs)
-            metrics = f"0,{self.total_activations_per_row[0]},{self.alerts_issued[0]},{self.rfm_issued[0]},{self.total_alert_time_s[0] / 1e6}"
+            metrics = f"0,{self.total_activations_per_row[0]},{self.alerts_issued[0]},{self.rfm_issued[0]},{self.total_alert_time_s[0] / 1}"
         else:
             # Multiple rows - output summed totals with "ALL" as row identifier
             total_activations = sum(self.total_activations_per_row)
             total_alerts = sum(self.alerts_issued)
-            total_alert_time_ms = sum(self.total_alert_time_s) / 1e6
+            total_alert_time_ms = sum(self.total_alert_time_s) / 1
             total_rfms = sum(self.rfm_issued)  # Always include total RFMs
             metrics = f"ALL,{total_activations},{total_alerts},{total_rfms},{total_alert_time_ms}"
         
