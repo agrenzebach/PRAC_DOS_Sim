@@ -221,17 +221,15 @@ class DRAMSimulator:
             
     def _issue_alert_rfms(self):
         """Issue rfmabo number of RFMs targeting rows with highest counters during alert."""
-        # Get list of (counter_value, row_index) pairs for rows with non-zero counters
-        rows_with_counts = [(self.counters[r], r) for r in range(self.rows) if self.counters[r] > 0]
+        # Get list of (counter_value, row_index) pairs for ALL rows, sorted by counter value (highest first)
+        all_rows = [(self.counters[r], r) for r in range(self.rows)]
+        all_rows.sort(reverse=True, key=lambda x: x[0])
         
-        # Sort by counter value in descending order (highest first)
-        rows_with_counts.sort(reverse=True, key=lambda x: x[0])
-        
-        # Issue up to rfmabo RFMs to the rows with highest counters
-        rfms_to_issue = min(self.rfmabo, len(rows_with_counts))
-        for i in range(rfms_to_issue):
-            target_row = rows_with_counts[i][1]
-            self.counters[target_row] = 0
+        # Always issue exactly rfmabo RFMs, regardless of counter values
+        for i in range(self.rfmabo):
+            # Target rows in order of highest counters first, cycling through all rows if needed
+            target_row = all_rows[i % len(all_rows)][1]
+            self.counters[target_row] = 0  # Reset counter (no effect if already 0)
             self.rfm_issued[target_row] += 1
             self.total_rfms += 1
             
