@@ -278,32 +278,24 @@ class DRAMSimulator:
         lines.append(f"Used time:          {human_time(used_time)}")
         lines.append(f"Idle time:          {human_time(idle_time)}")
         lines.append(f"Total alert time:   {human_time(total_alert)}")
+        lines.append(f"Total RFMs issued:  {self.total_rfms}")
         if self.rfm_enabled:
             window_duration = self.rfm_freq_max_s - self.rfm_freq_min_s
             lines.append(f"RFM window start:   {human_time(self.rfm_freq_min_s)}")
             lines.append(f"RFM window end:     {human_time(self.rfm_freq_max_s)}")
             lines.append(f"RFM window duration:{human_time(window_duration)}")
-            lines.append(f"Total RFMs issued:  {self.total_rfms}")
-            if self.trfcrfm_s > 0:
-                lines.append(f"tRFC RFM time:      {human_time(self.trfcrfm_s)}")
-                lines.append(f"Total RFM time:     {human_time(self.total_rfm_time_s)}")
+        if self.trfcrfm_s > 0:
+            lines.append(f"tRFC RFM time:      {human_time(self.trfcrfm_s)}")
+            lines.append(f"Total RFM time:     {human_time(self.total_rfm_time_s)}")
         lines.append("")
         lines.append("Per-row metrics:")
-        if self.rfm_enabled:
-            lines.append(f"{'Row':>6} | {'Activations':>12} | {'Alerts':>6} | {'RFMs':>6} | {'Alert Time':>12}")
-            lines.append("-" * 58)
-        else:
-            lines.append(f"{'Row':>6} | {'Activations':>12} | {'Alerts':>6} | {'Alert Time':>12}")
-            lines.append("-" * 46)
+        # Always show RFMs column since RFMs can be issued both proactively and in response to alerts
+        lines.append(f"{'Row':>6} | {'Activations':>12} | {'Alerts':>6} | {'RFMs':>6} | {'Alert Time':>12}")
+        lines.append("-" * 58)
         for r in range(self.rows):
-            if self.rfm_enabled:
-                lines.append(
-                    f"{r:6d} | {self.total_activations_per_row[r]:12d} | {self.alerts_issued[r]:6d} | {self.rfm_issued[r]:6d} | {human_time(self.total_alert_time_s[r]):>12}"
-                )
-            else:
-                lines.append(
-                    f"{r:6d} | {self.total_activations_per_row[r]:12d} | {self.alerts_issued[r]:6d} | {human_time(self.total_alert_time_s[r]):>12}"
-                )
+            lines.append(
+                f"{r:6d} | {self.total_activations_per_row[r]:12d} | {self.alerts_issued[r]:6d} | {self.rfm_issued[r]:6d} | {human_time(self.total_alert_time_s[r]):>12}"
+            )
         return "\n".join(lines)
 
     def csv_output(self) -> str:
@@ -312,21 +304,15 @@ class DRAMSimulator:
         input_params = f"{self.rows},{self.trc_str},{self.threshold},{self.rfmabo},{self.rfmfreqmin_str},{self.rfmfreqmax_str},{self.trfcrfm_str},{self.runtime_str}"
         
         if self.rows == 1:
-            # Single row - output as before with row number
-            if self.rfm_enabled:
-                metrics = f"0,{self.total_activations_per_row[0]},{self.alerts_issued[0]},{self.rfm_issued[0]},{self.total_alert_time_s[0] / 1}"
-            else:
-                metrics = f"0,{self.total_activations_per_row[0]},{self.alerts_issued[0]},0,{self.total_alert_time_s[0] / 1}"
+            # Single row - always include RFMs count (both proactive and alert RFMs)
+            metrics = f"0,{self.total_activations_per_row[0]},{self.alerts_issued[0]},{self.rfm_issued[0]},{self.total_alert_time_s[0] / 1e6}"
         else:
             # Multiple rows - output summed totals with "ALL" as row identifier
             total_activations = sum(self.total_activations_per_row)
             total_alerts = sum(self.alerts_issued)
-            total_alert_time_ms = sum(self.total_alert_time_s) / 1
-            if self.rfm_enabled:
-                total_rfms = sum(self.rfm_issued)
-                metrics = f"ALL,{total_activations},{total_alerts},{total_rfms},{total_alert_time_ms}"
-            else:
-                metrics = f"ALL,{total_activations},{total_alerts},0,{total_alert_time_ms}"
+            total_alert_time_ms = sum(self.total_alert_time_s) / 1e6
+            total_rfms = sum(self.rfm_issued)  # Always include total RFMs
+            metrics = f"ALL,{total_activations},{total_alerts},{total_rfms},{total_alert_time_ms}"
         
         return f"{input_params},{metrics}"
 
