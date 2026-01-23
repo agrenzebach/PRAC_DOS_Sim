@@ -182,16 +182,18 @@ class DRAMSimulator:
         while True:
             # Check if it's time for RFM before next activation
             if self.time_s >= self.next_rfm_time_s and self.rfm_enabled:
-                # Check if we're still within the window
+                # Issue RFM if we're within the window
                 if self.time_s <= self.next_rfm_window_end_s:
                     self._issue_rfm()
-                
-                # Check if window has expired, schedule next window
-                if self.time_s >= self.next_rfm_window_end_s:
-                    # Move to next window
-                    self.next_rfm_window_start_s += self.rfm_freq_min_s
-                    self.next_rfm_window_end_s = self.next_rfm_window_start_s + (self.rfm_freq_max_s - self.rfm_freq_min_s)
-                    self._schedule_next_rfm_in_window()
+                    # Disable further RFMs in this window by setting next_rfm_time_s beyond window end
+                    self.next_rfm_time_s = float('inf')
+            
+            # Check if current window has expired and schedule next window
+            if self.time_s >= self.next_rfm_window_end_s and self.rfm_enabled:
+                # Move to next window
+                self.next_rfm_window_start_s += self.rfm_freq_min_s
+                self.next_rfm_window_end_s = self.next_rfm_window_start_s + (self.rfm_freq_max_s - self.rfm_freq_min_s)
+                self._schedule_next_rfm_in_window()
                 
             # Can we start an ACTIVATE within the runtime?
             if self.time_s + self.trc_s > self.runtime_s:
