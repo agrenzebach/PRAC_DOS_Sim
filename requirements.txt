@@ -1,0 +1,6 @@
+# DRAM Simulator - No external dependencies required
+# This project uses only Python standard library modules:
+# - argparse
+# - sys 
+# - random
+# - typing
