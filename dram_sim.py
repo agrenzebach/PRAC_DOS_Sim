@@ -20,7 +20,7 @@ Common parameters (both modes):
 - --rows           Number of rows to operate on.
 - --threshold      Counter threshold; ALERT raised when counter > threshold.
 - --rfmfreqmin     RFM window start time (e.g., '32us', '64us'). Use '0' to disable RFM.
-- --rfmfreqmax     RFM window end time (e.g., '48us', '80us'). Must be >= rfmfreqmin. Use '0' to disable RFM.
+- --rfmfreqmax     RFM window end time (e.g., '48us', '80us'). Must be < 2×rfmfreqmin. Use '0' to disable RFM.
 
 Inputs (report mode):
 - --dram-type      DRAM type (e.g., 'ddr5') for loading protocol parameters from config.
@@ -29,6 +29,7 @@ Inputs (explore mode):
 - --trc            tRC per ACTIVATE (e.g., '45ns', '3.2us', '64ms', '0.001s').
 - --rfmabo         Number of RFMs issued in response to ABO.
 - --trfcrfm        tRFC RFM time duration consumed when RFM is issued (e.g., '100ns', '1us'). Use '0' for no time consumption.
+- --isoc           Number of activates issued after alert but before reactive RFMs (default 0).
 - --runtime        Total simulation runtime (default 128 ms).
 
 Notes:
@@ -100,6 +101,7 @@ class DRAMSimulator:
         rfm_freq_min_s: float = 0.0,
         rfm_freq_max_s: float = 0.0,
         trfcrfm_s: float = 0.0,
+        isoc: int = 0,
         # Original string arguments for CSV output
         trc_str: str = "",
         rfmfreqmin_str: str = "",
@@ -122,10 +124,12 @@ class DRAMSimulator:
             raise ValueError("RFM frequency min must be >= 0")
         if rfm_freq_max_s < 0:
             raise ValueError("RFM frequency max must be >= 0")
-        if rfm_freq_min_s > 0 and rfm_freq_max_s > 0 and rfm_freq_max_s < rfm_freq_min_s:
-            raise ValueError("RFM frequency max must be >= RFM frequency min")
+        if rfm_freq_min_s > 0 and rfm_freq_max_s > 0 and rfm_freq_max_s >= 2 * rfm_freq_min_s:
+            raise ValueError("RFM frequency max must be < 2 × RFM frequency min")
         if trfcrfm_s < 0:
             raise ValueError("tRFC RFM time must be >= 0")
+        if isoc < 0:
+            raise ValueError("isoc must be >= 0")
 
         # Parameters
         self.rows = rows
@@ -137,6 +141,7 @@ class DRAMSimulator:
         self.rfm_freq_min_s = rfm_freq_min_s
         self.rfm_freq_max_s = rfm_freq_max_s
         self.trfcrfm_s = trfcrfm_s
+        self.isoc = isoc
         
         # Store original string arguments for CSV output
         self.trc_str = trc_str
@@ -153,6 +158,13 @@ class DRAMSimulator:
         self.alerts_issued: List[int] = [0] * rows
         self.total_alert_time_s: List[float] = [0.0] * rows
         self.total_activations: int = 0
+        
+        # Alert timing metrics
+        self.last_alert_end_time_s: float = -1.0  # Time when last alert ended (-1 = no alert yet)
+        self.current_consecutive_alert_time_s: float = 0.0  # Current consecutive alert duration
+        self.max_consecutive_alert_time_s: float = 0.0  # Maximum consecutive alert time seen
+        self.min_time_between_alerts_s: float = float('inf')  # Minimum gap between alerts
+        self.in_consecutive_alert: bool = False  # Whether we're currently in a consecutive alert sequence
         
         # RFM state - windowed approach
         self.rfm_enabled = rfm_freq_min_s > 0 and rfm_freq_max_s > 0
@@ -200,7 +212,7 @@ class DRAMSimulator:
             
             # Check if current window has expired and schedule next window
             if self.time_s >= self.next_rfm_window_end_s and self.rfm_enabled:
-                # Move to next window
+                # Move to next window - start at regular rfmfreqmin intervals
                 self.next_rfm_window_start_s += self.rfm_freq_min_s
                 self.next_rfm_window_end_s = self.next_rfm_window_start_s + (self.rfm_freq_max_s - self.rfm_freq_min_s)
                 self._schedule_next_rfm_in_window()
@@ -218,19 +230,100 @@ class DRAMSimulator:
 
             # Check threshold and possibly raise alert (GLOBAL STALL)
             if self.counters[row] > self.threshold and self.alert_duration_s > 0.0:
+                alert_start_time = self.time_s
+                
+                # Calculate time between alerts if this isn't the first alert
+                if self.last_alert_end_time_s >= 0.0:
+                    time_between_alerts = alert_start_time - self.last_alert_end_time_s
+                    self.min_time_between_alerts_s = min(self.min_time_between_alerts_s, time_between_alerts)
+                    
+                    # Check if this is a consecutive alert (no gap)
+                    if time_between_alerts == 0.0:
+                        if not self.in_consecutive_alert:
+                            # Starting a new consecutive sequence, include the previous alert time
+                            self.current_consecutive_alert_time_s = self.alert_duration_s
+                            self.in_consecutive_alert = True
+                    else:
+                        # Gap detected, end consecutive sequence
+                        if self.in_consecutive_alert:
+                            self.max_consecutive_alert_time_s = max(self.max_consecutive_alert_time_s, self.current_consecutive_alert_time_s)
+                            self.current_consecutive_alert_time_s = 0.0
+                            self.in_consecutive_alert = False
+                
                 remaining = self.runtime_s - self.time_s
                 if remaining > 0.0:
                     consume = min(self.alert_duration_s, remaining)
                     self.alerts_issued[row] += 1
                     self.total_alert_time_s[row] += consume
                     self.time_s += consume
+                    
+                    # Update consecutive alert tracking
+                    if self.in_consecutive_alert:
+                        self.current_consecutive_alert_time_s += consume
+                    else:
+                        self.current_consecutive_alert_time_s = consume
+                        self.in_consecutive_alert = True
+                    
+                    # Update last alert end time
+                    self.last_alert_end_time_s = self.time_s
                 
-                # Issue rfmabo number of RFMs targeting highest counter rows
-                self._issue_alert_rfms()
+                # Handle ISOC activates and potential re-alerting
+                self._handle_isoc_and_alert_rfms()
 
             # Next row (round robin)
             self.row_index = (self.row_index + 1) % self.rows
             
+    def _handle_isoc_and_alert_rfms(self):
+        """Handle ISOC activates after alert, then issue reactive RFMs, with potential re-alerting."""
+        re_alert_needed = False
+        re_alert_row = -1
+        
+        # Issue ISOC activates after alert but before reactive RFMs
+        for _ in range(self.isoc):
+            # Check if we have enough time for another activate
+            if self.time_s + self.trc_s > self.runtime_s:
+                break
+                
+            # Move to next row (round robin continues)
+            self.row_index = (self.row_index + 1) % self.rows
+            row = self.row_index
+            
+            # ACTIVATE current row
+            self.counters[row] += 1
+            self.total_activations_per_row[row] += 1
+            self.total_activations += 1
+            self.time_s += self.trc_s
+            
+            # Check if this activate triggers another alert
+            if self.counters[row] > self.threshold:
+                re_alert_needed = True
+                re_alert_row = row
+        
+        # Issue rfmabo number of RFMs targeting highest counter rows
+        self._issue_alert_rfms()
+        
+        # If re-alert is needed, trigger it after the reactive RFMs
+        if re_alert_needed and self.alert_duration_s > 0.0:
+            remaining = self.runtime_s - self.time_s
+            if remaining > 0.0:
+                consume = min(self.alert_duration_s, remaining)
+                self.alerts_issued[re_alert_row] += 1
+                self.total_alert_time_s[re_alert_row] += consume
+                self.time_s += consume
+                
+                # Update consecutive alert tracking for re-alert
+                if self.in_consecutive_alert:
+                    self.current_consecutive_alert_time_s += consume
+                else:
+                    self.current_consecutive_alert_time_s = consume
+                    self.in_consecutive_alert = True
+                
+                # Update last alert end time
+                self.last_alert_end_time_s = self.time_s
+                
+                # Issue another round of reactive RFMs for the re-alert
+                self._issue_alert_rfms()
+    
     def _issue_alert_rfms(self):
         """Issue rfmabo number of RFMs targeting rows with highest counters during alert."""
         # Get list of (counter_value, row_index) pairs for ALL rows, sorted by counter value (highest first)
@@ -268,9 +361,14 @@ class DRAMSimulator:
 
     def summary(self) -> str:
         """Build a human-readable summary of the simulation results."""
+        # Finalize consecutive alert tracking
+        if self.in_consecutive_alert and self.current_consecutive_alert_time_s > 0:
+            self.max_consecutive_alert_time_s = max(self.max_consecutive_alert_time_s, self.current_consecutive_alert_time_s)
+        
         used_time = self.time_s
         idle_time = max(0.0, self.runtime_s - used_time)
         total_alert = sum(self.total_alert_time_s)
+        total_alerts_count = sum(self.alerts_issued)
 
         lines = []
         lines.append("=== DRAM Activation Simulation Summary ===")
@@ -279,6 +377,7 @@ class DRAMSimulator:
         lines.append(f"Rows:               {self.rows}")
         lines.append(f"Threshold (>):      {self.threshold}")
         lines.append(f"RFM ABO:            {self.rfmabo}")
+        lines.append(f"ISOC:               {self.isoc}")
         if self.trfcrfm_s > 0:
             lines.append(f"Alert duration:     {human_time(self.alert_duration_s)} (RFM ABO × tRFC RFM)")
         else:
@@ -288,6 +387,12 @@ class DRAMSimulator:
         lines.append(f"Used time:          {human_time(used_time)}")
         lines.append(f"Idle time:          {human_time(idle_time)}")
         lines.append(f"Total alert time:   {human_time(total_alert)}")
+        if total_alerts_count > 0:
+            lines.append(f"Max consecutive alert: {human_time(self.max_consecutive_alert_time_s)}")
+            if self.min_time_between_alerts_s < float('inf'):
+                lines.append(f"Min time between alerts: {human_time(self.min_time_between_alerts_s)}")
+            else:
+                lines.append(f"Min time between alerts: N/A (single alert or no gaps)")
         lines.append(f"Total RFMs issued:  {self.total_rfms}")
         if self.rfm_enabled:
             window_duration = self.rfm_freq_max_s - self.rfm_freq_min_s
@@ -309,20 +414,28 @@ class DRAMSimulator:
         return "\n".join(lines)
 
     def csv_output(self) -> str:
-        """Output metrics in CSV format: rows,trc,threshold,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,Row,Activations,Alerts,RFMs,AlertTime"""
+        """Output metrics in CSV format: rows,trc,threshold,isoc,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,Row,Activations,Alerts,RFMs,AlertTime,MaxConsecutiveAlert,MinTimeBetweenAlerts"""
+        # Finalize consecutive alert tracking (same as in summary())
+        if self.in_consecutive_alert and self.current_consecutive_alert_time_s > 0:
+            self.max_consecutive_alert_time_s = max(self.max_consecutive_alert_time_s, self.current_consecutive_alert_time_s)
+        
         # Input parameters first
-        input_params = f"{self.rows},{self.trc_str},{self.threshold},{self.rfmabo},{self.rfmfreqmin_str},{self.rfmfreqmax_str},{self.trfcrfm_str},{self.runtime_str}"
+        input_params = f"{self.rows},{self.trc_str},{self.threshold},{self.isoc},{self.rfmabo},{self.rfmfreqmin_str},{self.rfmfreqmax_str},{self.trfcrfm_str},{self.runtime_str}"
+        
+        # Alert timing metrics
+        max_consecutive_alert = self.max_consecutive_alert_time_s
+        min_time_between_alerts = self.min_time_between_alerts_s if self.min_time_between_alerts_s < float('inf') else -1
         
         if self.rows == 1:
             # Single row - always include RFMs count (both proactive and alert RFMs)
-            metrics = f"0,{self.total_activations_per_row[0]},{self.alerts_issued[0]},{self.rfm_issued[0]},{self.total_alert_time_s[0] / 1}"
+            metrics = f"0,{self.total_activations_per_row[0]},{self.alerts_issued[0]},{self.rfm_issued[0]},{self.total_alert_time_s[0] / 1},{max_consecutive_alert},{min_time_between_alerts}"
         else:
             # Multiple rows - output summed totals with "ALL" as row identifier
             total_activations = sum(self.total_activations_per_row)
             total_alerts = sum(self.alerts_issued)
             total_alert_time_ms = sum(self.total_alert_time_s) / 1
             total_rfms = sum(self.rfm_issued)  # Always include total RFMs
-            metrics = f"ALL,{total_activations},{total_alerts},{total_rfms},{total_alert_time_ms}"
+            metrics = f"ALL,{total_activations},{total_alerts},{total_rfms},{total_alert_time_ms},{max_consecutive_alert},{min_time_between_alerts}"
         
         return f"{input_params},{metrics}"
 
@@ -353,7 +466,7 @@ def build_arg_parser():
     )
     report.add_argument(
         "--rfmfreqmax", type=str, default="0",
-        help="RFM (Row Fresh Management) window end time (e.g., '48us', '80us'). Must be >= rfmfreqmin. Default is 0 (disabled)."
+        help="RFM (Row Fresh Management) window end time (e.g., '48us', '80us'). Must be < 2×rfmfreqmin. Default is 0 (disabled)."
     )
     report.add_argument(
         "--csv", action="store_true",
@@ -376,6 +489,10 @@ def build_arg_parser():
         "--rfmabo", type=int, required=True,
         help="RFM ABO multiplier; alert duration = rfmabo × trfcrfm."
     )
+    explore.add_argument(
+        "--isoc", type=int, default=0,
+        help="Number of activates issued after alert but before reactive RFMs. Default is 0."
+    )
     explore.add_argument("--runtime", type=str, default="128ms", help="Total simulation runtime. Default is 128ms.")
     explore.add_argument(
         "--rfmfreqmin", type=str, default="0",
@@ -383,7 +500,7 @@ def build_arg_parser():
     )
     explore.add_argument(
         "--rfmfreqmax", type=str, default="0",
-        help="RFM (Row Fresh Management) window end time (e.g., '48us', '80us'). Must be >= rfmfreqmin. Default is 0 (disabled)."
+        help="RFM (Row Fresh Management) window end time (e.g., '48us', '80us'). Must be < 2×rfmfreqmin. Default is 0 (disabled)."
     )
     explore.add_argument(
         "--trfcrfm", type=str, default="0",
@@ -470,11 +587,13 @@ def main(argv=None):
         rfmabo = int(config.rfmabo)
         trfcrfm_str = config.trfcrfm
         runtime_str = config.refw
+        isoc = getattr(config, 'isoc', 0)  # Default to 0 if not in config
     else:  # explore mode
         trc_str = args.trc
         rfmabo = args.rfmabo
         trfcrfm_str = args.trfcrfm
         runtime_str = args.runtime
+        isoc = args.isoc
 
     try:
         trc_s = parse_time_to_seconds(trc_str)
@@ -487,8 +606,8 @@ def main(argv=None):
         return 2
 
     # Validate RFM frequency range
-    if rfm_freq_min_s > 0 and rfm_freq_max_s > 0 and rfm_freq_max_s < rfm_freq_min_s:
-        print(f"Error: rfmfreqmax ({args.rfmfreqmax}) must be >= rfmfreqmin ({args.rfmfreqmin})", file=sys.stderr)
+    if rfm_freq_min_s > 0 and rfm_freq_max_s > 0 and rfm_freq_max_s >= 2 * rfm_freq_min_s:
+        print(f"Error: rfmfreqmax ({args.rfmfreqmax}) must be < 2 × rfmfreqmin ({args.rfmfreqmin})", file=sys.stderr)
         return 2
 
     sim = DRAMSimulator(
@@ -500,6 +619,7 @@ def main(argv=None):
         rfm_freq_min_s=rfm_freq_min_s,
         rfm_freq_max_s=rfm_freq_max_s,
         trfcrfm_s=trfcrfm_s,
+        isoc=isoc,
         # Pass original string arguments for CSV output
         trc_str=trc_str,
         rfmfreqmin_str=args.rfmfreqmin,

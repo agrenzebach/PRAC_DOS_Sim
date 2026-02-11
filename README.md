@@ -11,6 +11,10 @@ This is a ready-to-use **Visual Studio Code** project for the PRAC (Per Row Acti
 - **Round-robin ACTIVATEs**: Activations cycle across N rows
 - **GLOBAL ALERT stalls**: When a counter exceeds threshold, ALERT duration is consumed immediately (no ACTIVATEs to ANY row during ALERT)
 - **Windowed RFM**: Configurable proactive RFM with randomized timing windows
+For example if rfmfreqmin = 32us & rfmfreqmax = 48us then every 32us a 16us window starts where a random RFM will be issued
+Time:     0us   32us   48us   64us   80us   96us   112us
+Windows:        [----W1---]   [----W2---]   [-----W3---]
+RFM:             ↑random       ↑random       ↑random
 - **Alert-based RFM**: Reactive RFMs triggered by threshold violations
 - **Comprehensive metrics**: Tracks activations, alerts, RFMs, and per-row alert time
 - **CSV output**: Parameter sweep-friendly output format
@@ -64,6 +68,7 @@ python dram_sim.py explore --rows 8 --trc 45ns --threshold 1000 --rfmabo 2 --trf
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `--trc` | tRC per ACTIVATE (e.g., '45ns', '3us', '64ms', '0.001s') | `45ns` |
+| `--isoc` | Number of Activates issued between ALERT and re-active RFM | `0` |
 | `--rfmabo` | RFM ABO multiplier; alert duration = rfmabo × trfcrfm | `4` |
 | `--trfcrfm` | tRFC RFM time duration consumed when RFM is issued (use '0' for no time consumption) | `410ns` |
 | `--runtime` | Total simulation runtime | `32ms` |
