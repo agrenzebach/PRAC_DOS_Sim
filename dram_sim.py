@@ -140,6 +140,8 @@ class DRAMSimulator:
             self.next_rfm_time_s: float = float('inf')
         self.rfm_issued: List[int] = [0] * rows  # Track RFMs issued per row
         self.total_rfms: int = 0
+        self.total_proactive_rfms: int = 0
+        self.total_abo_rfms: int = 0
         self.total_rfm_time_s: float = 0.0
 
     def _schedule_next_rfm_in_window(self):
@@ -304,6 +306,7 @@ class DRAMSimulator:
             self.counters[target_row] = random.randint(0, self.randreset)
             self.rfm_issued[target_row] += 1
             self.total_rfms += 1
+            self.total_abo_rfms += 1
             
     def _issue_rfm(self):
         """Issue RFM to the row closest to exceeding threshold."""
@@ -316,6 +319,7 @@ class DRAMSimulator:
             self.counters[target_row] = random.randint(0, self.randreset)
             self.rfm_issued[target_row] += 1
             self.total_rfms += 1
+            self.total_proactive_rfms += 1
             
             # Consume RFM time if specified and runtime allows
             if self.trfcrfm_s > 0:
@@ -352,6 +356,16 @@ class DRAMSimulator:
         lines.append(f"Total ACTIVATEs:    {self.total_activations}")
         lines.append(f"Used time:          {human_time(used_time)}")
         lines.append(f"Idle time:          {human_time(idle_time)}")
+        lines.append("")
+        lines.append(f"Total RFMs:         {self.total_rfms}")
+        lines.append(f"ABO-based RFMs:     {self.total_abo_rfms}")
+        lines.append(f"Proactive RFMs:     {self.total_proactive_rfms}")
+        if self.rfm_enabled:
+            window_duration = self.rfm_freq_max_s - self.rfm_freq_min_s
+            lines.append(f"RFM window start:   {human_time(self.rfm_freq_min_s)}")
+            lines.append(f"RFM window end:     {human_time(self.rfm_freq_max_s)}")
+            lines.append(f"RFM window dur.:    {human_time(window_duration)}")
+        lines.append(f"Proactive RFM time: {human_time(self.total_rfm_time_s)}")
         lines.append(f"Total alert time:   {human_time(total_alert)}")
         if total_alerts_count > 0:
             lines.append(f"Max consecutive alert: {human_time(self.max_consecutive_alert_time_s)}")
@@ -359,13 +373,6 @@ class DRAMSimulator:
                 lines.append(f"Min time between alerts: {human_time(self.min_time_between_alerts_s)}")
             else:
                 lines.append(f"Min time between alerts: N/A (single alert or no gaps)")
-        lines.append(f"Total RFMs issued:  {self.total_rfms}")
-        if self.rfm_enabled:
-            window_duration = self.rfm_freq_max_s - self.rfm_freq_min_s
-            lines.append(f"RFM window start:   {human_time(self.rfm_freq_min_s)}")
-            lines.append(f"RFM window end:     {human_time(self.rfm_freq_max_s)}")
-            lines.append(f"RFM window duration:{human_time(window_duration)}")
-        lines.append(f"Total RFM time:     {human_time(self.total_rfm_time_s)}")
         lines.append("")
         lines.append("Per-row metrics:")
         # Always show RFMs column since RFMs can be issued both proactively and in response to alerts
