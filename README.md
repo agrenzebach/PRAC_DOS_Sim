@@ -11,10 +11,12 @@ This is a ready-to-use **Visual Studio Code** project for the PRAC (Per Row Acti
 - **Round-robin ACTIVATEs**: Activations cycle across N rows
 - **GLOBAL ALERT stalls**: When a counter exceeds threshold, ALERT duration is consumed immediately (no ACTIVATEs to ANY row during ALERT)
 - **Windowed RFM**: Configurable proactive RFM with randomized timing windows
-For example if rfmfreqmin = 32us & rfmfreqmax = 48us then every 32us a 16us window starts where a random RFM will be issued
-Time:     0us   32us   48us   64us   80us   96us   112us
-Windows:        [----W1---]   [----W2---]   [-----W3---]
-RFM:             ↑random       ↑random       ↑random
+  For example if rfmfreqmin = 32us & rfmfreqmax = 48us then every 32us a 16us window starts where a random RFM will be issued
+  ```
+  Time:     0us   32us   48us   64us   80us   96us   112us
+  Windows:        [----W1---]   [----W2---]   [-----W3---]
+  RFM:             ↑random       ↑random       ↑random
+  ```
 - **Alert-based RFM**: Reactive RFMs triggered by threshold violations
 - **Comprehensive metrics**: Tracks activations, alerts, RFMs, and per-row alert time
 - **CSV output**: Parameter sweep-friendly output format
