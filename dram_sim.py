@@ -20,7 +20,7 @@ Common parameters (both modes):
 - --rows           Number of rows to operate on.
 - --threshold      Counter threshold; ALERT raised when counter > threshold.
 - --rfmfreqmin     RFM window start time (e.g., '32us', '64us'). Use '0' to disable RFM.
-- --rfmfreqmax     RFM window end time (e.g., '48us', '80us'). Must be < 2×rfmfreqmin. Use '0' to disable RFM.
+- --rfmfreqmax     RFM window end time (e.g., '48us', '80us'). Must be >= rfmfreqmin and < 2×rfmfreqmin. Use '0' to disable RFM.
 
 Inputs (report mode):
 - --dram-type      DRAM type (e.g., 'ddr5') for loading protocol parameters from config.
@@ -124,6 +124,8 @@ class DRAMSimulator:
             raise ValueError("RFM frequency min must be >= 0")
         if rfm_freq_max_s < 0:
             raise ValueError("RFM frequency max must be >= 0")
+        if rfm_freq_min_s > 0 and rfm_freq_max_s > 0 and rfm_freq_max_s < rfm_freq_min_s:
+            raise ValueError("RFM frequency max must be >= RFM frequency min")
         if rfm_freq_min_s > 0 and rfm_freq_max_s > 0 and rfm_freq_max_s >= 2 * rfm_freq_min_s:
             raise ValueError("RFM frequency max must be < 2 × RFM frequency min")
         if trfcrfm_s < 0:
@@ -466,7 +468,7 @@ def build_arg_parser():
     )
     report.add_argument(
         "--rfmfreqmax", type=str, default="0",
-        help="RFM (Row Fresh Management) window end time (e.g., '48us', '80us'). Must be < 2×rfmfreqmin. Default is 0 (disabled)."
+        help="RFM (Row Fresh Management) window end time (e.g., '48us', '80us'). Must be >= rfmfreqmin and < 2×rfmfreqmin. Default is 0 (disabled)."
     )
     report.add_argument(
         "--csv", action="store_true",
@@ -500,7 +502,7 @@ def build_arg_parser():
     )
     explore.add_argument(
         "--rfmfreqmax", type=str, default="0",
-        help="RFM (Row Fresh Management) window end time (e.g., '48us', '80us'). Must be < 2×rfmfreqmin. Default is 0 (disabled)."
+        help="RFM (Row Fresh Management) window end time (e.g., '48us', '80us'). Must be >= rfmfreqmin and < 2×rfmfreqmin. Default is 0 (disabled)."
     )
     explore.add_argument(
         "--trfcrfm", type=str, default="0",
@@ -606,6 +608,9 @@ def main(argv=None):
         return 2
 
     # Validate RFM frequency range
+    if rfm_freq_min_s > 0 and rfm_freq_max_s > 0 and rfm_freq_max_s < rfm_freq_min_s:
+        print(f"Error: rfmfreqmax ({args.rfmfreqmax}) must be >= rfmfreqmin ({args.rfmfreqmin})", file=sys.stderr)
+        return 2
     if rfm_freq_min_s > 0 and rfm_freq_max_s > 0 and rfm_freq_max_s >= 2 * rfm_freq_min_s:
         print(f"Error: rfmfreqmax ({args.rfmfreqmax}) must be < 2 × rfmfreqmin ({args.rfmfreqmin})", file=sys.stderr)
         return 2
