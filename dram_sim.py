@@ -340,11 +340,12 @@ class DRAMSimulator:
         lines.append(f"tRC per activate:   {human_time(self.trc_s)}")
         lines.append(f"Rows:               {self.rows}")
         lines.append(f"Threshold (>):      {self.threshold}")
+        lines.append(f"tRFC per RFM:       {human_time(self.trfcrfm_s)}")
         lines.append(f"RFM ABO:            {self.rfmabo}")
         lines.append(f"ISOC:               {self.isoc}")
         lines.append(f"RandReset:          {self.randreset}")
         if self.trfcrfm_s > 0:
-            lines.append(f"Alert duration:     {human_time(self.alert_duration_s)} (RFM ABO × tRFC RFM)")
+            lines.append(f"Alert duration:     {human_time(self.alert_duration_s)} (RFM ABO × tRFC per RFM)")
         else:
             lines.append(f"Alert duration:     {human_time(self.alert_duration_s)}")
         lines.append("")
@@ -364,9 +365,7 @@ class DRAMSimulator:
             lines.append(f"RFM window start:   {human_time(self.rfm_freq_min_s)}")
             lines.append(f"RFM window end:     {human_time(self.rfm_freq_max_s)}")
             lines.append(f"RFM window duration:{human_time(window_duration)}")
-        if self.trfcrfm_s > 0:
-            lines.append(f"tRFC RFM time:      {human_time(self.trfcrfm_s)}")
-            lines.append(f"Total RFM time:     {human_time(self.total_rfm_time_s)}")
+        lines.append(f"Total RFM time:     {human_time(self.total_rfm_time_s)}")
         lines.append("")
         lines.append("Per-row metrics:")
         # Always show RFMs column since RFMs can be issued both proactively and in response to alerts
