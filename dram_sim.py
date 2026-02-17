@@ -274,7 +274,11 @@ class DRAMSimulator:
 
             # Next row (round robin)
             self.row_index = (self.row_index + 1) % self.rows
-            
+
+        # Finalize consecutive alert tracking
+        if self.in_consecutive_alert and self.current_consecutive_alert_time_s > 0:
+            self.max_consecutive_alert_time_s = max(self.max_consecutive_alert_time_s, self.current_consecutive_alert_time_s)
+
     def _handle_isoc_and_alert_rfms(self):
         """Handle ISOC activates after alert, then issue reactive RFMs, with potential re-alerting."""
         re_alert_needed = False
@@ -363,10 +367,6 @@ class DRAMSimulator:
 
     def summary(self) -> str:
         """Build a human-readable summary of the simulation results."""
-        # Finalize consecutive alert tracking
-        if self.in_consecutive_alert and self.current_consecutive_alert_time_s > 0:
-            self.max_consecutive_alert_time_s = max(self.max_consecutive_alert_time_s, self.current_consecutive_alert_time_s)
-        
         used_time = self.time_s
         idle_time = max(0.0, self.runtime_s - used_time)
         total_alert = sum(self.total_alert_time_s)
@@ -417,10 +417,6 @@ class DRAMSimulator:
 
     def csv_output(self) -> str:
         """Output metrics in CSV format: rows,trc,threshold,isoc,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,Row,Activations,Alerts,RFMs,AlertTime,MaxConsecutiveAlert,MinTimeBetweenAlerts"""
-        # Finalize consecutive alert tracking (same as in summary())
-        if self.in_consecutive_alert and self.current_consecutive_alert_time_s > 0:
-            self.max_consecutive_alert_time_s = max(self.max_consecutive_alert_time_s, self.current_consecutive_alert_time_s)
-        
         # Input parameters first
         input_params = f"{self.rows},{self.trc_str},{self.threshold},{self.isoc},{self.rfmabo},{self.rfmfreqmin_str},{self.rfmfreqmax_str},{self.trfcrfm_str},{self.runtime_str}"
         
