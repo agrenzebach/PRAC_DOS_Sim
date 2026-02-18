@@ -43,7 +43,7 @@ import random
 from typing import List
 
 from cli import parse_and_validate_args
-from utils import human_time
+from utils import human_time, is_float_zero
 
 
 class DRAMSimulator:
@@ -120,13 +120,7 @@ class DRAMSimulator:
         self.alerts_issued: List[int] = [0] * rows
         self.total_alert_time_s: List[float] = [0.0] * rows
         self.total_activations: int = 0
-        
-        # Alert timing metrics
-        self.last_alert_end_time_s: float = -1.0  # Time when last alert ended (-1 = no alert yet)
-        self.current_consecutive_alert_time_s: float = 0.0  # Current consecutive alert duration
-        self.max_consecutive_alert_time_s: float = 0.0  # Maximum consecutive alert time seen
-        self.min_time_between_alerts_s: float = float('inf')  # Minimum gap between alerts
-        self.in_consecutive_alert: bool = False  # Whether we're currently in a consecutive alert sequence
+        self.alert_timestamps: List[float] = []  # Global list of all ALERT timestamps
         
         # RFM state - windowed approach
         self.rfm_enabled = rfm_freq_min_s > 0 and rfm_freq_max_s > 0
@@ -192,44 +186,15 @@ class DRAMSimulator:
             self.total_activations += 1
             self.time_s += self.trc_s  # activation time consumed
 
-            # Check threshold and possibly raise alert (GLOBAL STALL)
+            # Check threshold and possibly raise ALERT (GLOBAL STALL)
             if self.counters[row] > self.threshold and self.alert_duration_s > 0.0:
-                alert_start_time = self.time_s
-                
-                # Calculate time between alerts if this isn't the first alert
-                if self.last_alert_end_time_s >= 0.0:
-                    time_between_alerts = alert_start_time - self.last_alert_end_time_s
-                    self.min_time_between_alerts_s = min(self.min_time_between_alerts_s, time_between_alerts)
-                    
-                    # Check if this is a consecutive alert (no gap)
-                    if time_between_alerts == 0.0:
-                        if not self.in_consecutive_alert:
-                            # Starting a new consecutive sequence, include the previous alert time
-                            self.current_consecutive_alert_time_s = self.alert_duration_s
-                            self.in_consecutive_alert = True
-                    else:
-                        # Gap detected, end consecutive sequence
-                        if self.in_consecutive_alert:
-                            self.max_consecutive_alert_time_s = max(self.max_consecutive_alert_time_s, self.current_consecutive_alert_time_s)
-                            self.current_consecutive_alert_time_s = 0.0
-                            self.in_consecutive_alert = False
-                
                 remaining = self.runtime_s - self.time_s
                 if remaining > 0.0:
+                    self.alert_timestamps.append(self.time_s)  # Record when ALERT started
                     consume = min(self.alert_duration_s, remaining)
                     self.alerts_issued[row] += 1
                     self.total_alert_time_s[row] += consume
                     self.time_s += consume
-                    
-                    # Update consecutive alert tracking
-                    if self.in_consecutive_alert:
-                        self.current_consecutive_alert_time_s += consume
-                    else:
-                        self.current_consecutive_alert_time_s = consume
-                        self.in_consecutive_alert = True
-                    
-                    # Update last alert end time
-                    self.last_alert_end_time_s = self.time_s
                 
                 # Handle ISOC activates and potential re-alerting
                 self._handle_isoc_and_alert_rfms()
@@ -237,60 +202,42 @@ class DRAMSimulator:
             # Next row (round robin)
             self.row_index = (self.row_index + 1) % self.rows
 
-        # Finalize consecutive alert tracking
-        if self.in_consecutive_alert and self.current_consecutive_alert_time_s > 0:
-            self.max_consecutive_alert_time_s = max(self.max_consecutive_alert_time_s, self.current_consecutive_alert_time_s)
-
     def _handle_isoc_and_alert_rfms(self):
-        """Handle ISOC activates after alert, then issue reactive RFMs, with potential re-alerting."""
-        re_alert_needed = False
-        re_alert_row = -1
+        """Handle ISOC activates within alert, then issue reactive RFMs, with potential re-alerting."""
+        isoc_activated_rows = []  # Track rows activated by ISOC
         
-        # Issue ISOC activates after alert but before reactive RFMs
+        # Issue ISOC activates within alert duration (no extra time consumed)
         for _ in range(self.isoc):
-            # Check if we have enough time for another activate
-            if self.time_s + self.trc_s > self.runtime_s:
-                break
-                
             # Move to next row (round robin continues)
             self.row_index = (self.row_index + 1) % self.rows
             row = self.row_index
             
-            # ACTIVATE current row
+            # ACTIVATE current row (squeezed within alert duration)
             self.counters[row] += 1
             self.total_activations_per_row[row] += 1
             self.total_activations += 1
-            self.time_s += self.trc_s
             
-            # Check if this activate triggers another alert
-            if self.counters[row] > self.threshold:
-                re_alert_needed = True
-                re_alert_row = row
+            isoc_activated_rows.append(row)
         
         # Issue rfmabo number of RFMs targeting highest counter rows
         self._issue_alert_rfms()
         
-        # If re-alert is needed, trigger it after the reactive RFMs
-        if re_alert_needed and self.alert_duration_s > 0.0:
-            remaining = self.runtime_s - self.time_s
-            if remaining > 0.0:
-                consume = min(self.alert_duration_s, remaining)
-                self.alerts_issued[re_alert_row] += 1
-                self.total_alert_time_s[re_alert_row] += consume
-                self.time_s += consume
+        # Check which ISOC-activated rows still exceed threshold after RFMs
+        re_alert_rows = [r for r in isoc_activated_rows if self.counters[r] > self.threshold]
+        
+        # Fire re-alerts for rows still above threshold (back-to-back, gap = 0)
+        for re_alert_row in re_alert_rows:
+            if self.alert_duration_s > 0.0:
+                remaining = self.runtime_s - self.time_s
+                if remaining > 0.0:
+                    self.alert_timestamps.append(self.time_s)  # Record re-alert timestamp
+                    consume = min(self.alert_duration_s, remaining)
+                    self.alerts_issued[re_alert_row] += 1
+                    self.total_alert_time_s[re_alert_row] += consume
+                    self.time_s += consume
                 
-                # Update consecutive alert tracking for re-alert
-                if self.in_consecutive_alert:
-                    self.current_consecutive_alert_time_s += consume
-                else:
-                    self.current_consecutive_alert_time_s = consume
-                    self.in_consecutive_alert = True
-                
-                # Update last alert end time
-                self.last_alert_end_time_s = self.time_s
-                
-                # Issue another round of reactive RFMs for the re-alert
-                self._issue_alert_rfms()
+                # Each re-alert gets its own ISOC activates and RFMs (can chain further)
+                self._handle_isoc_and_alert_rfms()
     
     def _issue_alert_rfms(self):
         """Issue rfmabo number of RFMs targeting rows with highest counters during alert."""
@@ -336,7 +283,6 @@ class DRAMSimulator:
         used_time = self.time_s
         idle_time = max(0.0, self.runtime_s - used_time)
         total_alert = sum(self.total_alert_time_s)
-        total_alerts_count = sum(self.alerts_issued)
 
         lines = []
         lines.append("=== DRAM Activation Simulation Summary ===")
@@ -349,9 +295,9 @@ class DRAMSimulator:
         lines.append(f"ISOC:               {self.isoc}")
         lines.append(f"RandReset:          {self.randreset}")
         if self.trfcrfm_s > 0:
-            lines.append(f"Alert duration:     {human_time(self.alert_duration_s)} (RFM ABO × tRFC per RFM)")
+            lines.append(f"ALERT duration:     {human_time(self.alert_duration_s)} (RFM ABO × tRFC per RFM)")
         else:
-            lines.append(f"Alert duration:     {human_time(self.alert_duration_s)}")
+            lines.append(f"ALERT duration:     {human_time(self.alert_duration_s)}")
         lines.append("")
         lines.append(f"Total ACTIVATEs:    {self.total_activations}")
         lines.append(f"Used time:          {human_time(used_time)}")
@@ -366,17 +312,50 @@ class DRAMSimulator:
             lines.append(f"RFM window end:     {human_time(self.rfm_freq_max_s)}")
             lines.append(f"RFM window dur.:    {human_time(window_duration)}")
         lines.append(f"Proactive RFM time: {human_time(self.total_rfm_time_s)}")
-        lines.append(f"Total alert time:   {human_time(total_alert)}")
-        if total_alerts_count > 0:
-            lines.append(f"Max consecutive alert: {human_time(self.max_consecutive_alert_time_s)}")
-            if self.min_time_between_alerts_s < float('inf'):
-                lines.append(f"Min time between alerts: {human_time(self.min_time_between_alerts_s)}")
-            else:
-                lines.append(f"Min time between alerts: N/A (single alert or no gaps)")
+
+        # ALERT gap statistics (gap = end of previous ALERT to start of next ALERT)
+        if len(self.alert_timestamps) >= 2:
+            gaps = [self.alert_timestamps[i+1] - self.alert_timestamps[i] - self.alert_duration_s
+                   for i in range(len(self.alert_timestamps) - 1)]
+            # Snap near-zero gaps to exactly 0.0 to avoid floating point noise
+            gaps = [0.0 if is_float_zero(g) else g for g in gaps]
+            min_gap = min(gaps)
+            max_gap = max(gaps)
+            sorted_gaps = sorted(gaps)
+            n = len(sorted_gaps)
+            median_gap = sorted_gaps[n // 2] if n % 2 == 1 else (sorted_gaps[n // 2 - 1] + sorted_gaps[n // 2]) / 2
+
+            # Longest consecutive back-to-back sequence (measured by duration)
+            longest_b2b_duration = self.alert_duration_s
+            seq_start_idx = None
+            for i, g in enumerate(gaps):
+                if is_float_zero(g):
+                    if seq_start_idx is None:
+                        seq_start_idx = i  # Start of a new sequence (first ALERT index)
+                    # Duration: start of first ALERT → end of current (i+1) ALERT
+                    seq_duration = (self.alert_timestamps[i + 1] + self.alert_duration_s) - self.alert_timestamps[seq_start_idx]
+                    longest_b2b_duration = max(longest_b2b_duration, seq_duration)
+                else:
+                    seq_start_idx = None  # Reset sequence
+
+            lines.append("")
+            lines.append(f"Total ALERTs:       {len(self.alert_timestamps)}")
+            lines.append(f"Total ALERT time:   {human_time(total_alert)}")
+            lines.append(f"Longest ALERT duration (including back-to-back): {human_time(longest_b2b_duration)}")
+            lines.append("Gap between ALERTs (prev end \u2192 next start):")
+            lines.append(f"Min Gap:            {human_time(min_gap)}")
+            lines.append(f"Max Gap:            {human_time(max_gap)}")
+            lines.append(f"Median Gap:         {human_time(median_gap)}")
+        elif len(self.alert_timestamps) == 1:
+            lines.append("")
+            lines.append(f"Total ALERTs:       1")
+            lines.append(f"Total ALERT time:   {human_time(total_alert)}")
+
+        # Per-row metrics
         lines.append("")
         lines.append("Per-row metrics:")
-        # Always show RFMs column since RFMs can be issued both proactively and in response to alerts
-        lines.append(f"{'Row':>6} | {'Activations':>12} | {'Alerts':>6} | {'RFMs':>6} | {'Alert Time':>12}")
+        # Always show RFMs column since RFMs can be issued both proactively and in response to ALERTs
+        lines.append(f"{'Row':>6} | {'Activations':>12} | {'ALERTs':>6} | {'RFMs':>6} | {'ALERT Time':>12}")
         lines.append("-" * 58)
         for r in range(self.rows):
             lines.append(
@@ -384,27 +363,54 @@ class DRAMSimulator:
             )
         return "\n".join(lines)
 
+    def _compute_alert_gap_metrics(self):
+        """Compute ALERT gap metrics from timestamps."""
+        total_alerts = len(self.alert_timestamps)
+        if total_alerts >= 2:
+            gaps = [self.alert_timestamps[i+1] - self.alert_timestamps[i] - self.alert_duration_s
+                   for i in range(len(self.alert_timestamps) - 1)]
+            # Snap near-zero gaps to exactly 0.0 to avoid floating point noise
+            gaps = [0.0 if is_float_zero(g) else g for g in gaps]
+            min_gap = min(gaps)
+            max_gap = max(gaps)
+            sorted_gaps = sorted(gaps)
+            n = len(sorted_gaps)
+            median_gap = sorted_gaps[n // 2] if n % 2 == 1 else (sorted_gaps[n // 2 - 1] + sorted_gaps[n // 2]) / 2
+            longest_b2b_duration = self.alert_duration_s
+            seq_start_idx = None
+            for i, g in enumerate(gaps):
+                if is_float_zero(g):
+                    if seq_start_idx is None:
+                        seq_start_idx = i
+                    seq_duration = (self.alert_timestamps[i + 1] + self.alert_duration_s) - self.alert_timestamps[seq_start_idx]
+                    longest_b2b_duration = max(longest_b2b_duration, seq_duration)
+                else:
+                    seq_start_idx = None
+            return total_alerts, min_gap, max_gap, median_gap, longest_b2b_duration
+        else:
+            return total_alerts, -1, -1, -1, 0.0
+
     def csv_output(self) -> str:
-        """Output metrics in CSV format: rows,trc,threshold,isoc,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,Row,Activations,Alerts,RFMs,AlertTime,MaxConsecutiveAlert,MinTimeBetweenAlerts"""
+        """Output metrics in CSV format: rows,trc,threshold,isoc,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,Row,Activations,ALERTs,RFMs,ALERTTime,TotalALERTs,MinALERTGap,MaxALERTGap,MedianALERTGap,LongestB2BALERTDuration"""
         # Input parameters first
         input_params = f"{self.rows},{self.trc_str},{self.threshold},{self.isoc},{self.rfmabo},{self.rfmfreqmin_str},{self.rfmfreqmax_str},{self.trfcrfm_str},{self.runtime_str}"
         
-        # Alert timing metrics
-        max_consecutive_alert = self.max_consecutive_alert_time_s
-        min_time_between_alerts = self.min_time_between_alerts_s if self.min_time_between_alerts_s < float('inf') else -1
+        # ALERT gap metrics
+        total_alerts, min_gap, max_gap, median_gap, longest_b2b = self._compute_alert_gap_metrics()
+        alert_metrics = f"{total_alerts},{min_gap},{max_gap},{median_gap},{longest_b2b}"
         
         if self.rows == 1:
             # Single row - always include RFMs count (both proactive and alert RFMs)
-            metrics = f"0,{self.total_activations_per_row[0]},{self.alerts_issued[0]},{self.rfm_issued[0]},{self.total_alert_time_s[0]},{max_consecutive_alert},{min_time_between_alerts}"
+            metrics = f"0,{self.total_activations_per_row[0]},{self.alerts_issued[0]},{self.rfm_issued[0]},{self.total_alert_time_s[0]}"
         else:
             # Multiple rows - output summed totals with "ALL" as row identifier
             total_activations = sum(self.total_activations_per_row)
-            total_alerts = sum(self.alerts_issued)
+            total_alerts_issued = sum(self.alerts_issued)
             total_alert_time = sum(self.total_alert_time_s)
             total_rfms = sum(self.rfm_issued)  # Always include total RFMs
-            metrics = f"ALL,{total_activations},{total_alerts},{total_rfms},{total_alert_time},{max_consecutive_alert},{min_time_between_alerts}"
+            metrics = f"ALL,{total_activations},{total_alerts_issued},{total_rfms},{total_alert_time}"
         
-        return f"{input_params},{metrics}"
+        return f"{input_params},{metrics},{alert_metrics}"
 
 
 def main(argv=None):
