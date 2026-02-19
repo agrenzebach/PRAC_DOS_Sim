@@ -112,14 +112,14 @@ Runtime:            32.000 ms
 Total ACTIVATEs:    218364
 Total RFMs issued:  2659
 Per-row metrics:
-   Row |  Activations | Alerts |   RFMs |   Alert Time
+   Row |  Activations | ALERTs |   RFMs |   ALERT Time
    ...
 ```
 
 ### CSV Output
 ```
-rows,trc,threshold,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,Row,Activations,Alerts,RFMs,AlertTime
-8,45ns,1000,2,24us,36us,200ns,10ms,ALL,171651,0,6502,0.0
+rows,trc,threshold,isoc,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,Row,Activations,ALERTs,RFMs,ALERTTime,TotalALERTs,LongestSeqB2BALERTs
+8,45ns,1000,0,2,24us,36us,200ns,10ms,ALL,171651,0,6502,0.0,0,1
 ```
 
 ## Notes
@@ -127,3 +127,4 @@ rows,trc,threshold,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,Row,Activations,
 - **Time Units**: Supports ns (nanoseconds), us (microseconds), ms (milliseconds), s (seconds)
 - **RFM Types**: Both proactive (windowed) and reactive (alert-based) RFMs are counted
 - **CSV Format**: Designed for easy parameter sweep analysis and data processing
+- **Back-to-back ALERTs**: Two consecutive ALERTs are considered *back-to-back* when the gap between them (end of previous ALERT to start of next ALERT) equals exactly `isoc × tRC`. This accounts for the ISOC activations that occur between ALERTs. When `isoc=0`, back-to-back means zero gap (i.e., one ALERT fires immediately after the previous one ends).

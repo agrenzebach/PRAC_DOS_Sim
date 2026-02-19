@@ -188,36 +188,42 @@ class DRAMSimulator:
 
             # Check threshold and possibly raise ALERT (GLOBAL STALL)
             if self.counters[row] > self.threshold and self.alert_duration_s > 0.0:
-                remaining = self.runtime_s - self.time_s
-                if remaining > 0.0:
-                    self.alert_timestamps.append(self.time_s)  # Record when ALERT started
-                    consume = min(self.alert_duration_s, remaining)
-                    self.alerts_issued[row] += 1
-                    self.total_alert_time_s[row] += consume
-                    self.time_s += consume
-                
-                # Handle ISOC activates and potential re-alerting
-                self._handle_isoc_and_alert_rfms()
+                # Issue ISOC activates first, then ALERT with RFMs
+                self._handle_isoc_and_alert(row)
 
             # Next row (round robin)
             self.row_index = (self.row_index + 1) % self.rows
 
-    def _handle_isoc_and_alert_rfms(self):
-        """Handle ISOC activates within alert, then issue reactive RFMs, with potential re-alerting."""
+    def _handle_isoc_and_alert(self, triggering_row: int):
+        """Issue ISOC activates first (consuming tRC each), then ALERT with reactive RFMs, with potential re-alerting."""
         isoc_activated_rows = []  # Track rows activated by ISOC
         
-        # Issue ISOC activates within alert duration (no extra time consumed)
+        # Issue ISOC activates BEFORE the ALERT (each consumes tRC)
         for _ in range(self.isoc):
+            # Check if we have enough time for another activate
+            if self.time_s + self.trc_s > self.runtime_s:
+                break
+            
             # Move to next row (round robin continues)
             self.row_index = (self.row_index + 1) % self.rows
             row = self.row_index
             
-            # ACTIVATE current row (squeezed within alert duration)
+            # ACTIVATE current row (consumes tRC)
             self.counters[row] += 1
             self.total_activations_per_row[row] += 1
             self.total_activations += 1
+            self.time_s += self.trc_s
             
             isoc_activated_rows.append(row)
+        
+        # ALERT fires: consume alert duration (GLOBAL STALL) and issue RFMs
+        remaining = self.runtime_s - self.time_s
+        if remaining > 0.0:
+            self.alert_timestamps.append(self.time_s)  # Record when ALERT started
+            consume = min(self.alert_duration_s, remaining)
+            self.alerts_issued[triggering_row] += 1
+            self.total_alert_time_s[triggering_row] += consume
+            self.time_s += consume
         
         # Issue rfmabo number of RFMs targeting highest counter rows
         self._issue_alert_rfms()
@@ -225,19 +231,10 @@ class DRAMSimulator:
         # Check which ISOC-activated rows still exceed threshold after RFMs
         re_alert_rows = [r for r in isoc_activated_rows if self.counters[r] > self.threshold]
         
-        # Fire re-alerts for rows still above threshold (back-to-back, gap = 0)
+        # Fire re-alerts for rows still above threshold
         for re_alert_row in re_alert_rows:
             if self.alert_duration_s > 0.0:
-                remaining = self.runtime_s - self.time_s
-                if remaining > 0.0:
-                    self.alert_timestamps.append(self.time_s)  # Record re-alert timestamp
-                    consume = min(self.alert_duration_s, remaining)
-                    self.alerts_issued[re_alert_row] += 1
-                    self.total_alert_time_s[re_alert_row] += consume
-                    self.time_s += consume
-                
-                # Each re-alert gets its own ISOC activates and RFMs (can chain further)
-                self._handle_isoc_and_alert_rfms()
+                self._handle_isoc_and_alert(re_alert_row)
     
     def _issue_alert_rfms(self):
         """Issue rfmabo number of RFMs targeting rows with highest counters during alert."""
@@ -295,9 +292,9 @@ class DRAMSimulator:
         lines.append(f"ISOC:               {self.isoc}")
         lines.append(f"RandReset:          {self.randreset}")
         if self.trfcrfm_s > 0:
-            lines.append(f"ALERT duration:     {human_time(self.alert_duration_s)} (RFM ABO × tRFC per RFM)")
+            lines.append(f"ALERT servicing duration: {human_time(self.alert_duration_s)} (RFM ABO × tRFC per RFM)")
         else:
-            lines.append(f"ALERT duration:     {human_time(self.alert_duration_s)}")
+            lines.append(f"ALERT servicing duration: {human_time(self.alert_duration_s)}")
         lines.append("")
         lines.append(f"Total ACTIVATEs:    {self.total_activations}")
         lines.append(f"Used time:          {human_time(used_time)}")
@@ -313,43 +310,31 @@ class DRAMSimulator:
             lines.append(f"RFM window dur.:    {human_time(window_duration)}")
         lines.append(f"Proactive RFM time: {human_time(self.total_rfm_time_s)}")
 
-        # ALERT gap statistics (gap = end of previous ALERT to start of next ALERT)
+        # ALERT statistics
         if len(self.alert_timestamps) >= 2:
             gaps = [self.alert_timestamps[i+1] - self.alert_timestamps[i] - self.alert_duration_s
                    for i in range(len(self.alert_timestamps) - 1)]
-            # Snap near-zero gaps to exactly 0.0 to avoid floating point noise
-            gaps = [0.0 if is_float_zero(g) else g for g in gaps]
-            min_gap = min(gaps)
-            max_gap = max(gaps)
-            sorted_gaps = sorted(gaps)
-            n = len(sorted_gaps)
-            median_gap = sorted_gaps[n // 2] if n % 2 == 1 else (sorted_gaps[n // 2 - 1] + sorted_gaps[n // 2]) / 2
+            # Two ALERTs are back-to-back when separated by exactly isoc activations
+            b2b_gap = self.isoc * self.trc_s
 
-            # Longest consecutive back-to-back sequence (measured by duration)
-            longest_b2b_duration = self.alert_duration_s
-            seq_start_idx = None
-            for i, g in enumerate(gaps):
-                if is_float_zero(g):
-                    if seq_start_idx is None:
-                        seq_start_idx = i  # Start of a new sequence (first ALERT index)
-                    # Duration: start of first ALERT → end of current (i+1) ALERT
-                    seq_duration = (self.alert_timestamps[i + 1] + self.alert_duration_s) - self.alert_timestamps[seq_start_idx]
-                    longest_b2b_duration = max(longest_b2b_duration, seq_duration)
+            # Longest consecutive back-to-back sequence (counted by ALERTs)
+            longest_b2b_count = 1
+            current_b2b_count = 1
+            for g in gaps:
+                if is_float_zero(g - b2b_gap):
+                    current_b2b_count += 1
+                    longest_b2b_count = max(longest_b2b_count, current_b2b_count)
                 else:
-                    seq_start_idx = None  # Reset sequence
+                    current_b2b_count = 1  # Reset sequence
 
             lines.append("")
             lines.append(f"Total ALERTs:       {len(self.alert_timestamps)}")
-            lines.append(f"Total ALERT time:   {human_time(total_alert)}")
-            lines.append(f"Longest ALERT duration (including back-to-back): {human_time(longest_b2b_duration)}")
-            lines.append("Gap between ALERTs (prev end \u2192 next start):")
-            lines.append(f"Min Gap:            {human_time(min_gap)}")
-            lines.append(f"Max Gap:            {human_time(max_gap)}")
-            lines.append(f"Median Gap:         {human_time(median_gap)}")
+            lines.append(f"Total ALERT servicing time: {human_time(total_alert)}")
+            lines.append(f"Longest seq. back-to-back ALERTs: {longest_b2b_count}")
         elif len(self.alert_timestamps) == 1:
             lines.append("")
             lines.append(f"Total ALERTs:       1")
-            lines.append(f"Total ALERT time:   {human_time(total_alert)}")
+            lines.append(f"Total ALERT servicing time: {human_time(total_alert)}")
 
         # Per-row metrics
         lines.append("")
@@ -363,41 +348,34 @@ class DRAMSimulator:
             )
         return "\n".join(lines)
 
-    def _compute_alert_gap_metrics(self):
-        """Compute ALERT gap metrics from timestamps."""
+    def _compute_alert_metrics(self):
+        """Compute ALERT metrics from timestamps."""
         total_alerts = len(self.alert_timestamps)
         if total_alerts >= 2:
             gaps = [self.alert_timestamps[i+1] - self.alert_timestamps[i] - self.alert_duration_s
                    for i in range(len(self.alert_timestamps) - 1)]
-            # Snap near-zero gaps to exactly 0.0 to avoid floating point noise
-            gaps = [0.0 if is_float_zero(g) else g for g in gaps]
-            min_gap = min(gaps)
-            max_gap = max(gaps)
-            sorted_gaps = sorted(gaps)
-            n = len(sorted_gaps)
-            median_gap = sorted_gaps[n // 2] if n % 2 == 1 else (sorted_gaps[n // 2 - 1] + sorted_gaps[n // 2]) / 2
-            longest_b2b_duration = self.alert_duration_s
-            seq_start_idx = None
-            for i, g in enumerate(gaps):
-                if is_float_zero(g):
-                    if seq_start_idx is None:
-                        seq_start_idx = i
-                    seq_duration = (self.alert_timestamps[i + 1] + self.alert_duration_s) - self.alert_timestamps[seq_start_idx]
-                    longest_b2b_duration = max(longest_b2b_duration, seq_duration)
+            # Two ALERTs are back-to-back when separated by exactly isoc activations
+            b2b_gap = self.isoc * self.trc_s
+            longest_b2b_count = 1
+            current_b2b_count = 1
+            for g in gaps:
+                if is_float_zero(g - b2b_gap):
+                    current_b2b_count += 1
+                    longest_b2b_count = max(longest_b2b_count, current_b2b_count)
                 else:
-                    seq_start_idx = None
-            return total_alerts, min_gap, max_gap, median_gap, longest_b2b_duration
+                    current_b2b_count = 1
+            return total_alerts, longest_b2b_count
         else:
-            return total_alerts, -1, -1, -1, 0.0
+            return total_alerts, 1
 
     def csv_output(self) -> str:
-        """Output metrics in CSV format: rows,trc,threshold,isoc,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,Row,Activations,ALERTs,RFMs,ALERTTime,TotalALERTs,MinALERTGap,MaxALERTGap,MedianALERTGap,LongestB2BALERTDuration"""
+        """Output metrics in CSV format: rows,trc,threshold,isoc,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,Row,Activations,ALERTs,RFMs,ALERTTime,TotalALERTs,LongestSeqB2BALERTs"""
         # Input parameters first
         input_params = f"{self.rows},{self.trc_str},{self.threshold},{self.isoc},{self.rfmabo},{self.rfmfreqmin_str},{self.rfmfreqmax_str},{self.trfcrfm_str},{self.runtime_str}"
         
-        # ALERT gap metrics
-        total_alerts, min_gap, max_gap, median_gap, longest_b2b = self._compute_alert_gap_metrics()
-        alert_metrics = f"{total_alerts},{min_gap},{max_gap},{median_gap},{longest_b2b}"
+        # ALERT metrics
+        total_alerts, longest_b2b = self._compute_alert_metrics()
+        alert_metrics = f"{total_alerts},{longest_b2b}"
         
         if self.rows == 1:
             # Single row - always include RFMs count (both proactive and alert RFMs)
