@@ -9,6 +9,7 @@ Supports two modes:
 Behavior:
 - Round-robin ACTIVATEs across N rows.
 - Each ACTIVATE consumes tRC time.
+- tFAW constraint: Maximum 4 ACTIVATEs allowed in any tFAW time window.
 - Each ACTIVATE increments a per-row counter.
 - If a counter strictly exceeds the threshold, raise an ALERT:
     * ALERT duration is consumed immediately (GLOBAL STALL).
@@ -27,6 +28,7 @@ Inputs (report mode):
 
 Inputs (explore mode):
 - --trc            tRC per ACTIVATE (e.g., '45ns', '3.2us', '64ms', '0.001s').
+- --tfaw           tFAW timing constraint for 4 activates window (e.g., '20ns', '25ns'). Default is 20ns.
 - --rfmabo         Number of RFMs issued in response to ABO.
 - --trfcrfm        tRFC RFM time duration consumed when RFM is issued (e.g., '100ns', '1us'). Use '0' for no time consumption.
 - --isoc           Number of ACTIVATEs issued after alert but before reactive RFMs (default 0).
@@ -35,6 +37,7 @@ Inputs (explore mode):
 - --runtime        Total simulation runtime (default 128 ms).
 
 Notes:
+- tFAW constraint enforces that no more than 4 ACTIVATEs can occur within any tFAW time window.
 - ALERT time is a GLOBAL STALL: while an alert is active, no ACTIVATEs occur.
 - ALERT starts immediately after the ACTIVATE that triggered it.
 - If remaining runtime is shorter than the alert duration, only the remaining time is consumed and counted.
@@ -58,6 +61,7 @@ class DRAMSimulator:
         rfm_freq_min_s: float = 0.0,
         rfm_freq_max_s: float = 0.0,
         trfcrfm_s: float = 0.0,
+        tfaw_s: float = 20e-9,
         isoc: int = 0,
         randreset: int = 0,
         abo_delay: int = 0,
@@ -66,6 +70,7 @@ class DRAMSimulator:
         rfmfreqmin_str: str = "",
         rfmfreqmax_str: str = "",
         trfcrfm_str: str = "",
+        tfaw_str: str = "",
         runtime_str: str = "",
     ):
         # Validate inputs
@@ -89,6 +94,8 @@ class DRAMSimulator:
             raise ValueError("RFM frequency max must be < 2 × RFM frequency min")
         if trfcrfm_s < 0:
             raise ValueError("tRFC RFM time must be >= 0")
+        if tfaw_s <= 0:
+            raise ValueError("tFAW must be > 0")
         if isoc < 0:
             raise ValueError("isoc must be >= 0")
         if randreset < 0:
@@ -107,6 +114,7 @@ class DRAMSimulator:
         self.rfm_freq_min_s = rfm_freq_min_s
         self.rfm_freq_max_s = rfm_freq_max_s
         self.trfcrfm_s = trfcrfm_s
+        self.tfaw_s = tfaw_s
         self.isoc = isoc
         self.randreset = randreset
         
@@ -115,6 +123,7 @@ class DRAMSimulator:
         self.rfmfreqmin_str = rfmfreqmin_str
         self.rfmfreqmax_str = rfmfreqmax_str
         self.trfcrfm_str = trfcrfm_str
+        self.tfaw_str = tfaw_str
         self.runtime_str = runtime_str
 
         # State
@@ -126,6 +135,9 @@ class DRAMSimulator:
         self.total_alert_time_s: List[float] = [0.0] * rows
         self.total_activations: int = 0
         self.alert_timestamps: List[float] = []  # Global list of all ALERT timestamps
+        
+        # tFAW constraint tracking - rolling window of last 4 activate timestamps
+        self.activate_timestamps: List[float] = []  # Track activate timestamps for tFAW constraint
         
         # RFM state - windowed approach
         self.rfm_enabled = rfm_freq_min_s > 0 and rfm_freq_max_s > 0
@@ -184,11 +196,25 @@ class DRAMSimulator:
             if self.time_s + self.trc_s > self.runtime_s:
                 break
 
+            # Check tFAW constraint before issuing ACTIVATE
+            self._enforce_tfaw_constraint()
+            
+            # Can we still start an ACTIVATE within the runtime after tFAW delay?
+            if self.time_s + self.trc_s > self.runtime_s:
+                break
+
             # ACTIVATE current row
             row = self.row_index
             self.counters[row] += 1  # Threshold checking counter
             self.total_activations_per_row[row] += 1  # Total activations counter
             self.total_activations += 1
+            
+            # Record activate timestamp for tFAW tracking
+            self.activate_timestamps.append(self.time_s)
+            # Keep only last 4 timestamps for rolling window
+            if len(self.activate_timestamps) > 4:
+                self.activate_timestamps.pop(0)
+            
             self.time_s += self.trc_s  # activation time consumed
 
             # Check threshold and possibly raise ALERT (GLOBAL STALL)
@@ -217,6 +243,11 @@ class DRAMSimulator:
             self.counters[row] += 1
             self.total_activations_per_row[row] += 1
             self.total_activations += 1
+            # Record activate timestamp for tFAW tracking
+            self.activate_timestamps.append(self.time_s)
+            # Keep only last 4 timestamps for rolling window
+            if len(self.activate_timestamps) > 4:
+                self.activate_timestamps.pop(0)
             self.time_s += self.trc_s
             
             isoc_activated_rows.append(row)
@@ -242,6 +273,11 @@ class DRAMSimulator:
             self.counters[row] += 1
             self.total_activations_per_row[row] += 1
             self.total_activations += 1
+            # Record activate timestamp for tFAW tracking
+            self.activate_timestamps.append(self.time_s)
+            # Keep only last 4 timestamps for rolling window
+            if len(self.activate_timestamps) > 4:
+                self.activate_timestamps.pop(0)
             self.time_s += self.trc_s
             isoc_activated_rows.append(row)
 
@@ -291,6 +327,29 @@ class DRAMSimulator:
                     self.time_s += consume
         
         # Note: Next RFM is scheduled in the run loop when window expires
+        
+    def _enforce_tfaw_constraint(self):
+        """Enforce tFAW constraint: maximum 4 activates in any tFAW window.
+        
+        If we already have 4 activates in the last tFAW interval,
+        advance time until the oldest activate is outside the window.
+        """
+        # Remove old timestamps outside the tFAW window
+        current_time = self.time_s
+        self.activate_timestamps = [t for t in self.activate_timestamps if current_time - t < self.tfaw_s]
+        
+        # If we have 4 activates in the current tFAW window, we must wait
+        if len(self.activate_timestamps) >= 4:
+            # Find the oldest activate timestamp
+            oldest_activate = self.activate_timestamps[0]
+            # Calculate when that activate will be outside the tFAW window
+            earliest_next_activate = oldest_activate + self.tfaw_s
+            
+            # If we need to wait, advance time
+            if current_time < earliest_next_activate:
+                self.time_s = earliest_next_activate
+                # Clean up the activate timestamps list again after time advancement
+                self.activate_timestamps = [t for t in self.activate_timestamps if self.time_s - t < self.tfaw_s]
 
     def summary(self) -> str:
         """Build a human-readable summary of the simulation results."""
@@ -302,6 +361,7 @@ class DRAMSimulator:
         lines.append("=== DRAM Activation Simulation Summary ===")
         lines.append(f"Runtime:            {human_time(self.runtime_s)}")
         lines.append(f"tRC per activate:   {human_time(self.trc_s)}")
+        lines.append(f"tFAW:               {human_time(self.tfaw_s)}")
         lines.append(f"Rows:               {self.rows}")
         lines.append(f"Threshold (>):      {self.threshold}")
         lines.append(f"tRFC per RFM:       {human_time(self.trfcrfm_s)}")
@@ -387,7 +447,7 @@ class DRAMSimulator:
     def csv_output(self) -> str:
         """Output metrics in CSV format: rows,trc,threshold,isoc,abo_delay,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,Row,ACTIVATEs,ALERTs,RFMs,ALERTTime,TotalALERTs,LongestSeqConsecALERTs"""
         # Input parameters first
-        input_params = f"{self.rows},{self.trc_str},{self.threshold},{self.isoc},{self.abo_delay},{self.rfmabo},{self.rfmfreqmin_str},{self.rfmfreqmax_str},{self.trfcrfm_str},{self.runtime_str}"
+        input_params = f"{self.rows},{self.trc_str},{self.tfaw_str},{self.threshold},{self.isoc},{self.abo_delay},{self.rfmabo},{self.rfmfreqmin_str},{self.rfmfreqmax_str},{self.trfcrfm_str},{self.runtime_str}"
         
         # ALERT metrics
         total_alerts, longest_consec = self._compute_alert_metrics()

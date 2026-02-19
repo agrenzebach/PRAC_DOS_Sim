@@ -49,6 +49,7 @@ def _build_arg_parser():
     )
     explore.add_argument("--rows", type=int, required=True, help="Number of rows to operate on.")
     explore.add_argument("--trc", type=str, required=True, help="tRC per ACTIVATE (e.g., '45ns', '3us', '64ms', '0.001s').")
+    explore.add_argument("--tfaw", type=str, default="20ns", help="tFAW timing constraint for 4 activates window (e.g., '20ns', '25ns'). Default is 20ns.")
     explore.add_argument(
         "--threshold", type=int, required=True,
         help="Counter threshold; ALERT raised when counter strictly exceeds this value."
@@ -166,6 +167,7 @@ def parse_and_validate_args(argv=None):
             print(f"Error: {e}", file=sys.stderr)
             return 2
         trc_str = config.trc
+        tfaw_str = getattr(config, 'tfaw', '20ns')  # Default to 20ns if not in config
         rfmabo = int(config.rfmabo)
         trfcrfm_str = config.trfcrfm
         runtime_str = config.refw
@@ -174,6 +176,7 @@ def parse_and_validate_args(argv=None):
         abo_delay = getattr(config, 'abo_delay', 0)
     else:  # explore mode
         trc_str = args.trc
+        tfaw_str = args.tfaw
         rfmabo = args.rfmabo
         trfcrfm_str = args.trfcrfm
         runtime_str = args.runtime
@@ -186,6 +189,7 @@ def parse_and_validate_args(argv=None):
 
     try:
         trc_s = parse_time_to_seconds(trc_str)
+        tfaw_s = parse_time_to_seconds(tfaw_str)
         runtime_s = parse_time_to_seconds(runtime_str)
         rfm_freq_min_s = parse_time_to_seconds(rfmfreqmin_str)
         rfm_freq_max_s = parse_time_to_seconds(rfmfreqmax_str)
@@ -210,6 +214,7 @@ def parse_and_validate_args(argv=None):
     return {
         "rows": args.rows,
         "trc_s": trc_s,
+        "tfaw_s": tfaw_s,
         "threshold": args.threshold,
         "rfmabo": rfmabo,
         "runtime_s": runtime_s,
@@ -220,6 +225,7 @@ def parse_and_validate_args(argv=None):
         "randreset": randreset,
         "abo_delay": abo_delay,
         "trc_str": trc_str,
+        "tfaw_str": tfaw_str,
         "rfmfreqmin_str": rfmfreqmin_str,
         "rfmfreqmax_str": rfmfreqmax_str,
         "trfcrfm_str": trfcrfm_str,

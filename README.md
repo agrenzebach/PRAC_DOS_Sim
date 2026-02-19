@@ -71,6 +71,7 @@ python dram_sim.py explore --rows 8 --trc 45ns --threshold 1000 --rfmabo 2 --trf
 | Parameter | Description | Example |
 |-----------|-------------|---------|
 | `--trc` | tRC per ACTIVATE (e.g., '45ns', '3us', '64ms', '0.001s') | `45ns` |
+| `--tFAW` | Rolling time window during which no more than four ACT commands are allowed. | `20ns` |
 | `--isoc` | Number of ACTIVATEs issued between ALERT and re-active RFM | `0` |
 | `--rfmabo` | RFM ABO multiplier; alert duration = rfmabo × trfcrfm | `4` |
 | `--abo_delay` | Minimum number of ACTIVATEs between two consecutive ALERTs (0 to 3) | `0` |
