@@ -100,6 +100,8 @@ class DRAMSimulator:
             raise ValueError("isoc must be >= 0")
         if randreset < 0:
             raise ValueError("randreset must be >= 0")
+        if randreset > threshold:
+            raise ValueError("randreset must be <= threshold")
         if abo_delay < 0 or abo_delay > 3:
             raise ValueError("abo_delay must be between 0 and 3")
 
