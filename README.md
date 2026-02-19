@@ -57,7 +57,7 @@ python dram_sim.py explore --rows 8 --trc 45ns --threshold 1000 --rfmabo 2 --trf
 | `--threshold` | Counter threshold; ALERT raised when counter > threshold | `1000` |
 | `--rfmfreqmin` | RFM window start time (use '0' to disable RFM) | `32us` |
 | `--rfmfreqmax` | RFM window end time (must be >= rfmfreqmin, use '0' to disable RFM) | `48us` |
-| `--randreset`  | range of random values that row counter is reset to after serviced by RFM | `0` |
+| `--randreset`  | Range for random counter reset (0 to randreset). Default is 0 (always reset to 0) | `0` |
 | `--csv` | CSV output format | (flag) |
 
 #### Report Mode Parameters
@@ -72,7 +72,7 @@ python dram_sim.py explore --rows 8 --trc 45ns --threshold 1000 --rfmabo 2 --trf
 |-----------|-------------|---------|
 | `--trc` | tRC per ACTIVATE (e.g., '45ns', '3us', '64ms', '0.001s') | `45ns` |
 | `--tFAW` | Rolling time window during which no more than four ACT commands are allowed. | `20ns` |
-| `--isoc` | Number of ACTIVATEs issued between ALERT and re-active RFM | `0` |
+| `--isoc` | Number of ACTIVATEs issued between ALERT and reactive RFM | `0` |
 | `--rfmabo` | RFM ABO multiplier; alert duration = rfmabo × trfcrfm | `4` |
 | `--abo_delay` | Minimum number of ACTIVATEs between two consecutive ALERTs (0 to 3) | `0` |
 | `--trfcrfm` | tRFC RFM time duration consumed when RFM is issued (use '0' for no time consumption) | `410ns` |

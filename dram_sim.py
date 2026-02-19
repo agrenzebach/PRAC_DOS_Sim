@@ -22,6 +22,7 @@ Common parameters (both modes):
 - --threshold      Counter threshold; ALERT raised when counter > threshold.
 - --rfmfreqmin     RFM window start time (e.g., '32us', '64us'). Use '0' to disable RFM.
 - --rfmfreqmax     RFM window end time (e.g., '48us', '80us'). Must be >= rfmfreqmin and < 2×rfmfreqmin. Use '0' to disable RFM.
+- --randreset      Range for random counter reset (0 to randreset). Default is 0 (always reset to 0).
 
 Inputs (report mode):
 - --dram-type      DRAM type (e.g., 'ddr5') for loading protocol parameters from config.
@@ -32,7 +33,6 @@ Inputs (explore mode):
 - --rfmabo         Number of RFMs issued in response to ABO.
 - --trfcrfm        tRFC RFM time duration consumed when RFM is issued (e.g., '100ns', '1us'). Use '0' for no time consumption.
 - --isoc           Number of ACTIVATEs issued after alert but before reactive RFMs (default 0).
-- --randreset      Range for random counter reset (0 to randreset). Default is 0 (always reset to 0).
 - --abo_delay      ABO delay value (0 to 3). Default is 0.
 - --runtime        Total simulation runtime (default 128 ms).
 
