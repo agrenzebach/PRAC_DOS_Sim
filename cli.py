@@ -37,6 +37,14 @@ def _build_arg_parser():
         help="RFM (Row Fresh Management) window end time (e.g., '48us', '80us'). Must be >= rfmfreqmin and < 2×rfmfreqmin. Default is 0 (disabled)."
     )
     report.add_argument(
+        "--randreset", type=int, default=0,
+        help="Range for random counter reset (0 to randreset). Default is 0 (always reset to 0)."
+    )
+    report.add_argument(
+        "--seed", type=int, default=0,
+        help="Seed for random number generator. Default is 0."
+    )
+    report.add_argument(
         "--csv", action="store_true",
         help="Output results in CSV format: Row,ACTIVATEs,ALERTs,RFMs,ALERTTime"
     )
@@ -65,6 +73,10 @@ def _build_arg_parser():
     explore.add_argument(
         "--randreset", type=int, default=0,
         help="Range for random counter reset (0 to randreset). Default is 0 (always reset to 0)."
+    )
+    explore.add_argument(
+        "--seed", type=int, default=0,
+        help="Seed for random number generator. Default is 0."
     )
     explore.add_argument(
         "--abo_delay", type=int, default=0,
@@ -172,7 +184,7 @@ def parse_and_validate_args(argv=None):
         trfcrfm_str = config.trfcrfm
         runtime_str = config.refw
         isoc = getattr(config, 'isoc', 0)
-        randreset = getattr(config, 'randreset', 0)
+        randreset = args.randreset
         abo_delay = getattr(config, 'abo_delay', 0)
     else:  # explore mode
         trc_str = args.trc
@@ -223,6 +235,7 @@ def parse_and_validate_args(argv=None):
         "trfcrfm_s": trfcrfm_s,
         "isoc": isoc,
         "randreset": randreset,
+        "seed": args.seed,
         "abo_delay": abo_delay,
         "trc_str": trc_str,
         "tfaw_str": tfaw_str,
