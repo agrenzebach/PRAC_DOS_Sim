@@ -30,6 +30,7 @@ Inputs (explore mode):
 - --rfmabo         Number of RFMs issued in response to ABO.
 - --trfcrfm        tRFC RFM time duration consumed when RFM is issued (e.g., '100ns', '1us'). Use '0' for no time consumption.
 - --isoc           Number of activates issued after alert but before reactive RFMs (default 0).
+- --randreset      Range for random counter reset (0 to randreset). Default is 0 (always reset to 0).
 - --runtime        Total simulation runtime (default 128 ms).
 
 Notes:
@@ -57,6 +58,7 @@ class DRAMSimulator:
         rfm_freq_max_s: float = 0.0,
         trfcrfm_s: float = 0.0,
         isoc: int = 0,
+        randreset: int = 0,
         # Original string arguments for CSV output
         trc_str: str = "",
         rfmfreqmin_str: str = "",
@@ -87,6 +89,8 @@ class DRAMSimulator:
             raise ValueError("tRFC RFM time must be >= 0")
         if isoc < 0:
             raise ValueError("isoc must be >= 0")
+        if randreset < 0:
+            raise ValueError("randreset must be >= 0")
 
         # Parameters
         self.rows = rows
@@ -99,6 +103,7 @@ class DRAMSimulator:
         self.rfm_freq_max_s = rfm_freq_max_s
         self.trfcrfm_s = trfcrfm_s
         self.isoc = isoc
+        self.randreset = randreset
         
         # Store original string arguments for CSV output
         self.trc_str = trc_str
@@ -295,7 +300,8 @@ class DRAMSimulator:
         for i in range(self.rfmabo):
             # Target rows in order of highest counters first, cycling through all rows if needed
             target_row = all_rows[i % len(all_rows)][1]
-            self.counters[target_row] = 0  # Reset counter (no effect if already 0)
+            # Reset counter to random value between 0 and randreset
+            self.counters[target_row] = random.randint(0, self.randreset)
             self.rfm_issued[target_row] += 1
             self.total_rfms += 1
             
@@ -306,7 +312,8 @@ class DRAMSimulator:
         if max_counter > 0:  # Only issue RFM if there are activations to reset
             # Find the first row with the maximum counter value
             target_row = self.counters.index(max_counter)
-            self.counters[target_row] = 0
+            # Reset counter to random value between 0 and randreset
+            self.counters[target_row] = random.randint(0, self.randreset)
             self.rfm_issued[target_row] += 1
             self.total_rfms += 1
             
@@ -335,6 +342,7 @@ class DRAMSimulator:
         lines.append(f"Threshold (>):      {self.threshold}")
         lines.append(f"RFM ABO:            {self.rfmabo}")
         lines.append(f"ISOC:               {self.isoc}")
+        lines.append(f"RandReset:          {self.randreset}")
         if self.trfcrfm_s > 0:
             lines.append(f"Alert duration:     {human_time(self.alert_duration_s)} (RFM ABO × tRFC RFM)")
         else:

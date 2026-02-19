@@ -57,6 +57,7 @@ python dram_sim.py explore --rows 8 --trc 45ns --threshold 1000 --rfmabo 2 --trf
 | `--threshold` | Counter threshold; ALERT raised when counter > threshold | `1000` |
 | `--rfmfreqmin` | RFM window start time (use '0' to disable RFM) | `32us` |
 | `--rfmfreqmax` | RFM window end time (must be >= rfmfreqmin, use '0' to disable RFM) | `48us` |
+| `--randreset`  | range of random values that row counter is reset to after serviced by RFM | `0` |
 | `--csv` | CSV output format | (flag) |
 
 #### Report Mode Parameters

@@ -61,6 +61,10 @@ def _build_arg_parser():
         "--isoc", type=int, default=0,
         help="Number of activates issued after alert but before reactive RFMs. Default is 0."
     )
+    explore.add_argument(
+        "--randreset", type=int, default=0,
+        help="Range for random counter reset (0 to randreset). Default is 0 (always reset to 0)."
+    )
     explore.add_argument("--runtime", type=str, default="128ms", help="Total simulation runtime. Default is 128ms.")
     explore.add_argument(
         "--rfmfreqmin", type=str, default="0",
@@ -162,12 +166,14 @@ def parse_and_validate_args(argv=None):
         trfcrfm_str = config.trfcrfm
         runtime_str = config.refw
         isoc = getattr(config, 'isoc', 0)
+        randreset = getattr(config, 'randreset', 0)
     else:  # explore mode
         trc_str = args.trc
         rfmabo = args.rfmabo
         trfcrfm_str = args.trfcrfm
         runtime_str = args.runtime
         isoc = args.isoc
+        randreset = args.randreset
 
     rfmfreqmin_str = args.rfmfreqmin
     rfmfreqmax_str = args.rfmfreqmax
@@ -200,6 +206,7 @@ def parse_and_validate_args(argv=None):
         "rfm_freq_max_s": rfm_freq_max_s,
         "trfcrfm_s": trfcrfm_s,
         "isoc": isoc,
+        "randreset": randreset,
         "trc_str": trc_str,
         "rfmfreqmin_str": rfmfreqmin_str,
         "rfmfreqmax_str": rfmfreqmax_str,
