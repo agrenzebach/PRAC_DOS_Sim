@@ -1,6 +1,11 @@
 """Utility functions for time parsing and formatting."""
 
 
+def is_float_zero(value: float, epsilon: float = 1e-15) -> bool:
+    """Test whether a floating point value is effectively zero."""
+    return abs(value) < epsilon
+
+
 def parse_time_to_seconds(s: str) -> float:
     """
     Parse a time string to seconds. Accepts:

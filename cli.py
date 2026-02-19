@@ -38,7 +38,7 @@ def _build_arg_parser():
     )
     report.add_argument(
         "--csv", action="store_true",
-        help="Output results in CSV format: Row,Activations,Alerts,RFMs,AlertTime"
+        help="Output results in CSV format: Row,ACTIVATEs,ALERTs,RFMs,ALERTTime"
     )
 
     # Explore mode - all flags on command line
@@ -59,11 +59,15 @@ def _build_arg_parser():
     )
     explore.add_argument(
         "--isoc", type=int, default=0,
-        help="Number of activates issued after alert but before reactive RFMs. Default is 0."
+        help="Number of ACTIVATEs issued after alert but before reactive RFMs. Default is 0."
     )
     explore.add_argument(
         "--randreset", type=int, default=0,
         help="Range for random counter reset (0 to randreset). Default is 0 (always reset to 0)."
+    )
+    explore.add_argument(
+        "--abo_delay", type=int, default=0,
+        help="Minimum number of ACTIVATEs between two consecutive ALERTs (0 to 3). Default is 0."
     )
     explore.add_argument("--runtime", type=str, default="128ms", help="Total simulation runtime. Default is 128ms.")
     explore.add_argument(
@@ -80,7 +84,7 @@ def _build_arg_parser():
     )
     explore.add_argument(
         "--csv", action="store_true",
-        help="Output results in CSV format: Row,Activations,Alerts,RFMs,AlertTime"
+        help="Output results in CSV format: Row,ACTIVATEs,ALERTs,RFMs,ALERTTime"
     )
 
     return p, report, explore
@@ -167,6 +171,7 @@ def parse_and_validate_args(argv=None):
         runtime_str = config.refw
         isoc = getattr(config, 'isoc', 0)
         randreset = getattr(config, 'randreset', 0)
+        abo_delay = getattr(config, 'abo_delay', 0)
     else:  # explore mode
         trc_str = args.trc
         rfmabo = args.rfmabo
@@ -174,6 +179,7 @@ def parse_and_validate_args(argv=None):
         runtime_str = args.runtime
         isoc = args.isoc
         randreset = args.randreset
+        abo_delay = args.abo_delay
 
     rfmfreqmin_str = args.rfmfreqmin
     rfmfreqmax_str = args.rfmfreqmax
@@ -186,6 +192,11 @@ def parse_and_validate_args(argv=None):
         trfcrfm_s = parse_time_to_seconds(trfcrfm_str)
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
+        return 2
+
+    # Validate abo_delay range
+    if abo_delay < 0 or abo_delay > 3:
+        print(f"Error: abo_delay must be between 0 and 3, got {abo_delay}", file=sys.stderr)
         return 2
 
     # Validate RFM frequency range
@@ -207,6 +218,7 @@ def parse_and_validate_args(argv=None):
         "trfcrfm_s": trfcrfm_s,
         "isoc": isoc,
         "randreset": randreset,
+        "abo_delay": abo_delay,
         "trc_str": trc_str,
         "rfmfreqmin_str": rfmfreqmin_str,
         "rfmfreqmax_str": rfmfreqmax_str,
