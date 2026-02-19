@@ -23,6 +23,7 @@ Common parameters (both modes):
 - --rfmfreqmin     RFM window start time (e.g., '32us', '64us'). Use '0' to disable RFM.
 - --rfmfreqmax     RFM window end time (e.g., '48us', '80us'). Must be >= rfmfreqmin and < 2×rfmfreqmin. Use '0' to disable RFM.
 - --randreset      Range for random counter reset (0 to randreset). Default is 0 (always reset to 0).
+- --seed           Seed for random number generator. Default is 0.
 
 Inputs (report mode):
 - --dram-type      DRAM type (e.g., 'ddr5') for loading protocol parameters from config.
@@ -475,6 +476,8 @@ def main(argv=None):
         return params
 
     csv = params.pop("csv")
+    seed = params.pop("seed")
+    random.seed(seed)
     sim = DRAMSimulator(**params)
     sim.run()
     if csv:

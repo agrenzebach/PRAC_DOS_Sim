@@ -58,6 +58,7 @@ python dram_sim.py explore --rows 8 --trc 45ns --threshold 1000 --rfmabo 2 --trf
 | `--rfmfreqmin` | RFM window start time (use '0' to disable RFM) | `32us` |
 | `--rfmfreqmax` | RFM window end time (must be >= rfmfreqmin, use '0' to disable RFM) | `48us` |
 | `--randreset`  | Range for random counter reset (0 to randreset). Default is 0 (always reset to 0) | `0` |
+| `--seed` | Seed for random number generator. Default is 0 | `0` |
 | `--csv` | CSV output format | (flag) |
 
 #### Report Mode Parameters
