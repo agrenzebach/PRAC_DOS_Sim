@@ -29,12 +29,13 @@ Inputs (explore mode):
 - --trc            tRC per ACTIVATE (e.g., '45ns', '3.2us', '64ms', '0.001s').
 - --rfmabo         Number of RFMs issued in response to ABO.
 - --trfcrfm        tRFC RFM time duration consumed when RFM is issued (e.g., '100ns', '1us'). Use '0' for no time consumption.
-- --isoc           Number of activates issued after alert but before reactive RFMs (default 0).
+- --isoc           Number of ACTIVATEs issued after alert but before reactive RFMs (default 0).
 - --randreset      Range for random counter reset (0 to randreset). Default is 0 (always reset to 0).
+- --abo_delay      ABO delay value (0 to 3). Default is 0.
 - --runtime        Total simulation runtime (default 128 ms).
 
 Notes:
-- ALERT time is a GLOBAL STALL: while an alert is active, no activates occur.
+- ALERT time is a GLOBAL STALL: while an alert is active, no ACTIVATEs occur.
 - ALERT starts immediately after the ACTIVATE that triggered it.
 - If remaining runtime is shorter than the alert duration, only the remaining time is consumed and counted.
 """
@@ -59,6 +60,7 @@ class DRAMSimulator:
         trfcrfm_s: float = 0.0,
         isoc: int = 0,
         randreset: int = 0,
+        abo_delay: int = 0,
         # Original string arguments for CSV output
         trc_str: str = "",
         rfmfreqmin_str: str = "",
@@ -91,12 +93,15 @@ class DRAMSimulator:
             raise ValueError("isoc must be >= 0")
         if randreset < 0:
             raise ValueError("randreset must be >= 0")
+        if abo_delay < 0 or abo_delay > 3:
+            raise ValueError("abo_delay must be between 0 and 3")
 
         # Parameters
         self.rows = rows
         self.trc_s = trc_s
         self.threshold = threshold
         self.rfmabo = rfmabo
+        self.abo_delay = abo_delay
         self.alert_duration_s = rfmabo * trfcrfm_s  # Calculate alert duration
         self.runtime_s = runtime_s
         self.rfm_freq_min_s = rfm_freq_min_s
@@ -228,6 +233,18 @@ class DRAMSimulator:
         # Issue rfmabo number of RFMs targeting highest counter rows
         self._issue_alert_rfms()
         
+        # Issue abo_delay ACTIVATEs after ALERT+RFMs (mandatory delay before next ALERT)
+        for _ in range(self.abo_delay):
+            if self.time_s + self.trc_s > self.runtime_s:
+                break
+            self.row_index = (self.row_index + 1) % self.rows
+            row = self.row_index
+            self.counters[row] += 1
+            self.total_activations_per_row[row] += 1
+            self.total_activations += 1
+            self.time_s += self.trc_s
+            isoc_activated_rows.append(row)
+
         # Check which ISOC-activated rows still exceed threshold after RFMs
         re_alert_rows = [r for r in isoc_activated_rows if self.counters[r] > self.threshold]
         
@@ -290,6 +307,7 @@ class DRAMSimulator:
         lines.append(f"tRFC per RFM:       {human_time(self.trfcrfm_s)}")
         lines.append(f"RFM ABO:            {self.rfmabo}")
         lines.append(f"ISOC:               {self.isoc}")
+        lines.append(f"ABO Delay:          {self.abo_delay}")
         lines.append(f"RandReset:          {self.randreset}")
         if self.trfcrfm_s > 0:
             lines.append(f"ALERT servicing duration: {human_time(self.alert_duration_s)} (RFM ABO × tRFC per RFM)")
@@ -314,23 +332,21 @@ class DRAMSimulator:
         if len(self.alert_timestamps) >= 2:
             gaps = [self.alert_timestamps[i+1] - self.alert_timestamps[i] - self.alert_duration_s
                    for i in range(len(self.alert_timestamps) - 1)]
-            # Two ALERTs are back-to-back when separated by exactly isoc activations
-            b2b_gap = self.isoc * self.trc_s
-
-            # Longest consecutive back-to-back sequence (counted by ALERTs)
-            longest_b2b_count = 1
-            current_b2b_count = 1
+            # Two ALERTs are consecutive when separated by exactly (isoc + abo_delay) activations
+            consec_gap = (self.isoc + self.abo_delay) * self.trc_s
+            longest_consec_count = 1
+            current_consec_count = 1
             for g in gaps:
-                if is_float_zero(g - b2b_gap):
-                    current_b2b_count += 1
-                    longest_b2b_count = max(longest_b2b_count, current_b2b_count)
+                if is_float_zero(g - consec_gap):
+                    current_consec_count += 1
+                    longest_consec_count = max(longest_consec_count, current_consec_count)
                 else:
-                    current_b2b_count = 1  # Reset sequence
+                    current_consec_count = 1  # Reset sequence
 
             lines.append("")
             lines.append(f"Total ALERTs:       {len(self.alert_timestamps)}")
             lines.append(f"Total ALERT servicing time: {human_time(total_alert)}")
-            lines.append(f"Longest seq. back-to-back ALERTs: {longest_b2b_count}")
+            lines.append(f"Longest seq. consecutive ALERTs: {longest_consec_count}")
         elif len(self.alert_timestamps) == 1:
             lines.append("")
             lines.append(f"Total ALERTs:       1")
@@ -340,7 +356,7 @@ class DRAMSimulator:
         lines.append("")
         lines.append("Per-row metrics:")
         # Always show RFMs column since RFMs can be issued both proactively and in response to ALERTs
-        lines.append(f"{'Row':>6} | {'Activations':>12} | {'ALERTs':>6} | {'RFMs':>6} | {'ALERT Time':>12}")
+        lines.append(f"{'Row':>6} | {'ACTIVATEs':>12} | {'ALERTs':>6} | {'RFMs':>6} | {'ALERT Time':>12}")
         lines.append("-" * 58)
         for r in range(self.rows):
             lines.append(
@@ -354,28 +370,28 @@ class DRAMSimulator:
         if total_alerts >= 2:
             gaps = [self.alert_timestamps[i+1] - self.alert_timestamps[i] - self.alert_duration_s
                    for i in range(len(self.alert_timestamps) - 1)]
-            # Two ALERTs are back-to-back when separated by exactly isoc activations
-            b2b_gap = self.isoc * self.trc_s
-            longest_b2b_count = 1
-            current_b2b_count = 1
+            # Two ALERTs are consecutive when separated by exactly (isoc + abo_delay) activations
+            consec_gap = (self.isoc + self.abo_delay) * self.trc_s
+            longest_consec_count = 1
+            current_consec_count = 1
             for g in gaps:
-                if is_float_zero(g - b2b_gap):
-                    current_b2b_count += 1
-                    longest_b2b_count = max(longest_b2b_count, current_b2b_count)
+                if is_float_zero(g - consec_gap):
+                    current_consec_count += 1
+                    longest_consec_count = max(longest_consec_count, current_consec_count)
                 else:
-                    current_b2b_count = 1
-            return total_alerts, longest_b2b_count
+                    current_consec_count = 1
+            return total_alerts, longest_consec_count
         else:
             return total_alerts, 1
 
     def csv_output(self) -> str:
-        """Output metrics in CSV format: rows,trc,threshold,isoc,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,Row,Activations,ALERTs,RFMs,ALERTTime,TotalALERTs,LongestSeqB2BALERTs"""
+        """Output metrics in CSV format: rows,trc,threshold,isoc,abo_delay,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,Row,ACTIVATEs,ALERTs,RFMs,ALERTTime,TotalALERTs,LongestSeqConsecALERTs"""
         # Input parameters first
-        input_params = f"{self.rows},{self.trc_str},{self.threshold},{self.isoc},{self.rfmabo},{self.rfmfreqmin_str},{self.rfmfreqmax_str},{self.trfcrfm_str},{self.runtime_str}"
+        input_params = f"{self.rows},{self.trc_str},{self.threshold},{self.isoc},{self.abo_delay},{self.rfmabo},{self.rfmfreqmin_str},{self.rfmfreqmax_str},{self.trfcrfm_str},{self.runtime_str}"
         
         # ALERT metrics
-        total_alerts, longest_b2b = self._compute_alert_metrics()
-        alert_metrics = f"{total_alerts},{longest_b2b}"
+        total_alerts, longest_consec = self._compute_alert_metrics()
+        alert_metrics = f"{total_alerts},{longest_consec}"
         
         if self.rows == 1:
             # Single row - always include RFMs count (both proactive and alert RFMs)

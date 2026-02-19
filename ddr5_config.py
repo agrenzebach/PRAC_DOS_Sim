@@ -5,5 +5,6 @@ rfmabo = 4
 trfcrfm = "410ns"
 refw = "32ms"
 isoc = 0
+abo_delay = 0
 rfmfreqmin = "0us"
 rfmfreqmax = "0us"
