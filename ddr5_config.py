@@ -1,9 +1,8 @@
-# DDR5 DRAM Protocol Configuration
+# DDR5 DRAM Protocol Configuration for Activates to single Bank
 
-trc = "45ns"        # tRC timing between activates
-tfaw = "20ns"       # tFAW: minimum time for 4 activates (rolling window)
+trc = "48ns"        # tRC timing between activates
 rfmabo = 4
-trfcrfm = "410ns"
+trfcrfm = "350ns"   # tRFMab = 5*tRRFab
 refw = "32ms"
 isoc = 0
 abo_delay = 0

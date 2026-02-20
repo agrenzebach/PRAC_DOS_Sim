@@ -36,7 +36,7 @@ Inputs (explore mode):
 - --trfcrfm        tRFC RFM time duration consumed when RFM is issued (e.g., '100ns', '1us'). Use '0' for no time consumption.
 - --isoc           Number of ACTIVATEs issued after alert but before reactive RFMs (default 0).
 - --abo_delay      ABO delay value (0 to 3). Default is 0.
-- --runtime        Total simulation runtime (default 128 ms).
+- --runtime        Total simulation runtime (default 32 ms).
 
 Notes:
 - tFAW constraint enforces that no more than 4 ACTIVATEs can occur within any tFAW time window.
@@ -59,7 +59,7 @@ class DRAMSimulator:
         trc_s: float,
         threshold: int,
         rfmabo: int,
-        runtime_s: float = 0.128,
+        runtime_s: float = 0.032,
         rfm_freq_min_s: float = 0.0,
         rfm_freq_max_s: float = 0.0,
         trfcrfm_s: float = 0.0,
