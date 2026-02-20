@@ -2,6 +2,7 @@
 
 import argparse
 import importlib
+import re
 import sys
 
 from utils import parse_time_to_seconds
@@ -45,6 +46,11 @@ def _build_arg_parser():
         help="Seed for random number generator. Default is 0."
     )
     report.add_argument(
+        "--wkld", type=str, default="rr",
+        metavar="{rr,feinting,mixed:<feint_pct>}",
+        help="Workload type: 'rr' (round-robin), 'feinting', or 'mixed:<feint_pct>' (e.g., 'mixed:10' for 10%% feinting). Default is 'rr'."
+    )
+    report.add_argument(
         "--csv", action="store_true",
         help="Output results in CSV format: Row,ACTIVATEs,ALERTs,RFMs,ALERTTime"
     )
@@ -77,6 +83,11 @@ def _build_arg_parser():
     explore.add_argument(
         "--seed", type=int, default=0,
         help="Seed for random number generator. Default is 0."
+    )
+    explore.add_argument(
+        "--wkld", type=str, default="rr",
+        metavar="{rr,feinting,mixed:<feint_pct>}",
+        help="Workload type: 'rr' (round-robin), 'feinting', or 'mixed:<feint_pct>' (e.g., 'mixed:10' for 10%% feinting). Default is 'rr'."
     )
     explore.add_argument(
         "--abo_delay", type=int, default=0,
@@ -126,7 +137,10 @@ def _print_parser_help(subparser, mode_name: str, description: str):
     for action in subparser._actions:
         if action.option_strings:
             opts = ", ".join(action.option_strings)
-            print(f"  {opts:20} {action.help}")
+            if action.metavar:
+                opts += f" {action.metavar}"
+            help_text = (action.help or "").replace("%%", "%")
+            print(f"  {opts:20} {help_text}")
 
 
 def parse_and_validate_args(argv=None):
@@ -223,6 +237,17 @@ def parse_and_validate_args(argv=None):
         print(f"Error: rfmfreqmax ({rfmfreqmax_str}) must be < 2 × rfmfreqmin ({rfmfreqmin_str})", file=sys.stderr)
         return 2
 
+    # Validate workload type
+    wkld = args.wkld
+    if wkld not in ("rr", "feinting") and not re.match(r'^mixed:\d+$', wkld):
+        print(f"Error: --wkld must be 'rr', 'feinting', or 'mixed:<feint_pct>' (e.g., 'mixed:10'), got '{wkld}'", file=sys.stderr)
+        return 2
+    if wkld.startswith("mixed:"):
+        feint_pct = int(wkld.split(":")[1])
+        if feint_pct < 0 or feint_pct > 100:
+            print(f"Error: mixed feint percentage must be between 0 and 100, got {feint_pct}", file=sys.stderr)
+            return 2
+
     return {
         "rows": args.rows,
         "trc_s": trc_s,
@@ -236,6 +261,7 @@ def parse_and_validate_args(argv=None):
         "isoc": isoc,
         "randreset": randreset,
         "seed": args.seed,
+        "wkld": wkld,
         "abo_delay": abo_delay,
         "trc_str": trc_str,
         "tfaw_str": tfaw_str,

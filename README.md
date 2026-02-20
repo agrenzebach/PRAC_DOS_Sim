@@ -10,6 +10,10 @@ This is a ready-to-use **Visual Studio Code** project for the PRAC (Per Row Acti
   - `explore`: DRAM timings are passed via command-line flags
 - **Round-robin ACTIVATEs**: Activations cycle across N rows
 - **GLOBAL ALERT stalls**: When a counter exceeds threshold, ALERT duration is consumed immediately (no ACTIVATEs to ANY row during ALERT)
+- **Three workload types**:
+  - `rr`: Round-robin activations across N rows (default)
+  - `feinting`: Rows are permanently dropped after being serviced by RFM; simulation ends when all rows are dropped
+  - `mixed:<feint_pct>`: Each activation has a `feint_pct`% chance of being a feinting attack (round-robin over N tracked rows) and a `(100 - feint_pct)`% chance of being a random access to any row in a 128K row space. Random accesses that hit a tracked row increment its counter and can trigger ALERTs. All RFM-serviced rows are dropped permanently.
 - **Windowed RFM**: Configurable proactive RFM with randomized timing windows
   For example if rfmfreqmin = 32us & rfmfreqmax = 48us then every 32us a 16us window starts where a random RFM will be issued
   ```
@@ -59,6 +63,7 @@ python dram_sim.py explore --rows 8 --trc 45ns --threshold 1000 --rfmabo 2 --trf
 | `--rfmfreqmax` | RFM window end time (must be >= rfmfreqmin, use '0' to disable RFM) | `48us` |
 | `--randreset`  | Range for random counter reset (0 to randreset). Default is 0 (always reset to 0) | `0` |
 | `--seed` | Seed for random number generator. Default is 0 | `0` |
+| `--wkld` | Workload type: `rr` (round-robin), `feinting`, or `mixed:<feint_pct>` (e.g., `mixed:10`). Default is `rr` | `rr` |
 | `--csv` | CSV output format | (flag) |
 
 #### Report Mode Parameters
@@ -160,3 +165,4 @@ rows,trc,threshold,isoc,abo_delay,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,R
 - **RFM Types**: Both proactive (windowed) and reactive (alert-based) RFMs are counted
 - **CSV Format**: Designed for easy parameter sweep analysis and data processing
 - **Consecutive ALERTs**: Two ALERTs are considered *consecutive* when the gap between them (end of previous ALERT to start of next ALERT) equals exactly `(isoc + abo_delay) × tRC`. This accounts for the ISOC activations that occur before the ALERT and the mandatory ABO delay activations that occur after the ALERT. When both `isoc=0` and `abo_delay=0`, consecutive means zero gap (i.e., one ALERT fires immediately after the previous one ends).
+- **Worst-case attack**: The `feinting` workload represents the worst-case, as it has the potential to create the longest sequence of consecutive ALERTs.
