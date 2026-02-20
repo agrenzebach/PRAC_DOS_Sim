@@ -24,6 +24,7 @@ Common parameters (both modes):
 - --rfmfreqmax     RFM window end time (e.g., '48us', '80us'). Must be >= rfmfreqmin and < 2×rfmfreqmin. Use '0' to disable RFM.
 - --randreset      Range for random counter reset (0 to randreset). Default is 0 (always reset to 0).
 - --seed           Seed for random number generator. Default is 0.
+- --wkld           Workload type: 'rr' (round-robin), 'feinting', or 'mixed:<feint_pct>'. Default is 'rr'.
 
 Inputs (report mode):
 - --dram-type      DRAM type (e.g., 'ddr5') for loading protocol parameters from config.
@@ -66,6 +67,7 @@ class DRAMSimulator:
         isoc: int = 0,
         randreset: int = 0,
         abo_delay: int = 0,
+        wkld: str = "rr",
         # Original string arguments for CSV output
         trc_str: str = "",
         rfmfreqmin_str: str = "",
@@ -120,6 +122,13 @@ class DRAMSimulator:
         self.tfaw_s = tfaw_s
         self.isoc = isoc
         self.randreset = randreset
+
+        # Workload configuration
+        self.wkld = wkld
+        self.feint_pct = 0
+        if wkld.startswith("mixed:"):
+            self.feint_pct = int(wkld.split(":")[1])
+        self.rand_row_count = 131072  # 128K rows for random accesses
         
         # Store original string arguments for CSV output
         self.trc_str = trc_str
@@ -158,6 +167,9 @@ class DRAMSimulator:
         self.total_abo_rfms: int = 0
         self.total_rfm_time_s: float = 0.0
 
+        # Active rows tracking - rows are dropped permanently after RFM in feinting/mixed modes
+        self.active_rows: set = set(range(rows))
+
     def _schedule_next_rfm_in_window(self):
         """Schedule the next RFM at a random time within the current window."""
         if self.rfm_enabled:
@@ -180,6 +192,10 @@ class DRAMSimulator:
           - If it triggers an ALERT, consume alert duration immediately (GLOBAL STALL).
         """
         while True:
+            # Check if all tracked rows have been dropped (feinting/mixed modes)
+            if self.wkld != "rr" and not self.active_rows:
+                break
+
             # Check if it's time for RFM before next activation
             if self.time_s >= self.next_rfm_time_s and self.rfm_enabled:
                 # Issue RFM if we're within the window
@@ -194,6 +210,10 @@ class DRAMSimulator:
                 self.next_rfm_window_start_s += self.rfm_freq_min_s
                 self.next_rfm_window_end_s = self.next_rfm_window_start_s + (self.rfm_freq_max_s - self.rfm_freq_min_s)
                 self._schedule_next_rfm_in_window()
+
+            # Check again after RFM - all rows may have been dropped
+            if self.wkld != "rr" and not self.active_rows:
+                break
                 
             # Can we start an ACTIVATE within the runtime?
             if self.time_s + self.trc_s > self.runtime_s:
@@ -206,8 +226,38 @@ class DRAMSimulator:
             if self.time_s + self.trc_s > self.runtime_s:
                 break
 
-            # ACTIVATE current row
-            row = self.row_index
+            # Select row based on workload type
+            if self.wkld == "rr":
+                # Round-robin: ACTIVATE current row
+                row = self.row_index
+            elif self.wkld == "feinting":
+                # Feinting: find next active row
+                row = self._next_active_row()
+                if row is None:
+                    break
+            else:
+                # Mixed: probabilistic choice between feinting and random
+                if random.randint(1, 100) <= self.feint_pct:
+                    # Feinting activation
+                    row = self._next_active_row()
+                    if row is None:
+                        break
+                else:
+                    # Random access across 128K rows
+                    rand_row = random.randint(0, self.rand_row_count - 1)
+                    if rand_row < self.rows and rand_row in self.active_rows:
+                        # Random access hit a tracked feinting row
+                        row = rand_row
+                    else:
+                        # Random access to untracked row - just consume time
+                        self.total_activations += 1
+                        self.activate_timestamps.append(self.time_s)
+                        if len(self.activate_timestamps) > 4:
+                            self.activate_timestamps.pop(0)
+                        self.time_s += self.trc_s
+                        self.row_index = (self.row_index + 1) % self.rows
+                        continue
+
             self.counters[row] += 1  # Threshold checking counter
             self.total_activations_per_row[row] += 1  # Total activations counter
             self.total_activations += 1
@@ -228,6 +278,16 @@ class DRAMSimulator:
             # Next row (round robin)
             self.row_index = (self.row_index + 1) % self.rows
 
+    def _next_active_row(self):
+        """Find the next active row starting from row_index. Returns None if no active rows."""
+        if not self.active_rows:
+            return None
+        for _ in range(self.rows):
+            if self.row_index in self.active_rows:
+                return self.row_index
+            self.row_index = (self.row_index + 1) % self.rows
+        return None
+
     def _handle_isoc_and_alert(self, triggering_row: int):
         """Issue ISOC activates first (consuming tRC each), then ALERT with reactive RFMs, with potential re-alerting."""
         isoc_activated_rows = []  # Track rows activated by ISOC
@@ -238,9 +298,14 @@ class DRAMSimulator:
             if self.time_s + self.trc_s > self.runtime_s:
                 break
             
-            # Move to next row (round robin continues)
+            # Move to next row
             self.row_index = (self.row_index + 1) % self.rows
-            row = self.row_index
+            if self.wkld != "rr":
+                row = self._next_active_row()
+                if row is None:
+                    break
+            else:
+                row = self.row_index
             
             # ACTIVATE current row (consumes tRC)
             self.counters[row] += 1
@@ -272,7 +337,12 @@ class DRAMSimulator:
             if self.time_s + self.trc_s > self.runtime_s:
                 break
             self.row_index = (self.row_index + 1) % self.rows
-            row = self.row_index
+            if self.wkld != "rr":
+                row = self._next_active_row()
+                if row is None:
+                    break
+            else:
+                row = self.row_index
             self.counters[row] += 1
             self.total_activations_per_row[row] += 1
             self.total_activations += 1
@@ -294,40 +364,71 @@ class DRAMSimulator:
     
     def _issue_alert_rfms(self):
         """Issue rfmabo number of RFMs targeting rows with highest counters during alert."""
-        # Get list of (counter_value, row_index) pairs for ALL rows, sorted by counter value (highest first)
-        all_rows = [(self.counters[r], r) for r in range(self.rows)]
-        all_rows.sort(reverse=True, key=lambda x: x[0])
-        
-        # Always issue exactly rfmabo RFMs, regardless of counter values
-        for i in range(self.rfmabo):
-            # Target rows in order of highest counters first, cycling through all rows if needed
-            target_row = all_rows[i % len(all_rows)][1]
-            # Reset counter to random value between 0 and randreset
-            self.counters[target_row] = random.randint(0, self.randreset)
-            self.rfm_issued[target_row] += 1
-            self.total_rfms += 1
-            self.total_abo_rfms += 1
+        if self.wkld != "rr":
+            # Feinting/mixed: operate on active rows only
+            if not self.active_rows:
+                return
+            active_row_counters = [(self.counters[r], r) for r in self.active_rows]
+            active_row_counters.sort(reverse=True, key=lambda x: x[0])
+            for i in range(self.rfmabo):
+                if not active_row_counters:
+                    break
+                target_row = active_row_counters[i % len(active_row_counters)][1]
+                self.counters[target_row] = random.randint(0, self.randreset)
+                self.rfm_issued[target_row] += 1
+                self.total_rfms += 1
+                self.total_abo_rfms += 1
+                self.active_rows.discard(target_row)
+        else:
+            # Round-robin: operate on all rows
+            all_rows = [(self.counters[r], r) for r in range(self.rows)]
+            all_rows.sort(reverse=True, key=lambda x: x[0])
+            for i in range(self.rfmabo):
+                target_row = all_rows[i % len(all_rows)][1]
+                self.counters[target_row] = random.randint(0, self.randreset)
+                self.rfm_issued[target_row] += 1
+                self.total_rfms += 1
+                self.total_abo_rfms += 1
             
     def _issue_rfm(self):
         """Issue RFM to the row closest to exceeding threshold."""
-        # Find row with highest counter value (closest to threshold)
-        max_counter = max(self.counters)
-        if max_counter > 0:  # Only issue RFM if there are activations to reset
-            # Find the first row with the maximum counter value
-            target_row = self.counters.index(max_counter)
-            # Reset counter to random value between 0 and randreset
-            self.counters[target_row] = random.randint(0, self.randreset)
-            self.rfm_issued[target_row] += 1
-            self.total_rfms += 1
-            self.total_proactive_rfms += 1
-            
-            # Consume RFM time if specified and runtime allows
-            if self.trfcrfm_s > 0:
-                remaining = self.runtime_s - self.time_s
-                if remaining > 0:
-                    consume = min(self.trfcrfm_s, remaining)
-                    self.total_rfm_time_s += consume
-                    self.time_s += consume
+        if self.wkld != "rr":
+            # Feinting/mixed: operate on active rows only
+            if not self.active_rows:
+                return
+            max_counter = -1
+            target_row = None
+            for r in self.active_rows:
+                if self.counters[r] > max_counter:
+                    max_counter = self.counters[r]
+                    target_row = r
+            if target_row is not None and max_counter > 0:
+                self.counters[target_row] = random.randint(0, self.randreset)
+                self.rfm_issued[target_row] += 1
+                self.total_rfms += 1
+                self.total_proactive_rfms += 1
+                self.active_rows.discard(target_row)
+                if self.trfcrfm_s > 0:
+                    remaining = self.runtime_s - self.time_s
+                    if remaining > 0:
+                        consume = min(self.trfcrfm_s, remaining)
+                        self.total_rfm_time_s += consume
+                        self.time_s += consume
+        else:
+            # Round-robin: operate on all rows
+            max_counter = max(self.counters)
+            if max_counter > 0:
+                target_row = self.counters.index(max_counter)
+                self.counters[target_row] = random.randint(0, self.randreset)
+                self.rfm_issued[target_row] += 1
+                self.total_rfms += 1
+                self.total_proactive_rfms += 1
+                if self.trfcrfm_s > 0:
+                    remaining = self.runtime_s - self.time_s
+                    if remaining > 0:
+                        consume = min(self.trfcrfm_s, remaining)
+                        self.total_rfm_time_s += consume
+                        self.time_s += consume
         
         # Note: Next RFM is scheduled in the run loop when window expires
         
@@ -372,6 +473,7 @@ class DRAMSimulator:
         lines.append(f"ISOC:               {self.isoc}")
         lines.append(f"ABO Delay:          {self.abo_delay}")
         lines.append(f"RandReset:          {self.randreset}")
+        lines.append(f"Workload:           {self.wkld}")
         if self.trfcrfm_s > 0:
             lines.append(f"ALERT servicing duration: {human_time(self.alert_duration_s)} (RFM ABO × tRFC per RFM)")
         else:
