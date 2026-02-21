@@ -191,7 +191,7 @@ class DRAMSimulator:
           - If there's enough time for an ACTIVATE (tRC), perform it.
           - If it triggers an ALERT, consume alert duration immediately (GLOBAL STALL).
         """
-        while True:
+        while True:gi
             # Check if all tracked rows have been dropped (feinting/mixed modes)
             if self.wkld != "rr" and not self.active_rows:
                 break
@@ -547,10 +547,10 @@ class DRAMSimulator:
                     current_consec_count = 1
             return total_alerts, longest_consec_count
         else:
-            return total_alerts, 1
+            return total_alerts, total_alerts
 
     def csv_output(self) -> str:
-        """Output metrics in CSV format: rows,trc,threshold,isoc,abo_delay,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,Row,ACTIVATEs,ALERTs,RFMs,ALERTTime,TotalALERTs,LongestSeqConsecALERTs"""
+        """Output metrics in CSV format: rows,trc,tfaw,threshold,isoc,abo_delay,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,Row,ACTIVATEs,ALERTs,RFMs,ALERTTime,TotalALERTs,LongestSeqConsecALERTs"""
         # Input parameters first
         input_params = f"{self.rows},{self.trc_str},{self.tfaw_str},{self.threshold},{self.isoc},{self.abo_delay},{self.rfmabo},{self.rfmfreqmin_str},{self.rfmfreqmax_str},{self.trfcrfm_str},{self.runtime_str}"
         
