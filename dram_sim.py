@@ -191,7 +191,7 @@ class DRAMSimulator:
           - If there's enough time for an ACTIVATE (tRC), perform it.
           - If it triggers an ALERT, consume alert duration immediately (GLOBAL STALL).
         """
-        while True:gi
+        while True:
             # Check if all tracked rows have been dropped (feinting/mixed modes)
             if self.wkld != "rr" and not self.active_rows:
                 break
