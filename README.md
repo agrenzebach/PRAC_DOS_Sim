@@ -79,8 +79,7 @@ python dram_sim.py explore --rows 8 --trc 45ns --threshold 1000 --rfmabo 2 --trf
 | `--trc` | tRC per ACTIVATE (e.g., '45ns', '3us', '64ms', '0.001s') | `45ns` |
 | `--tFAW` | Rolling time window during which no more than four ACT commands are allowed. | `20ns` |
 | `--isoc` | Number of ACTIVATEs issued between ALERT and reactive RFM | `0` |
-| `--rfmabo` | RFM ABO multiplier; alert duration = rfmabo × trfcrfm | `4` |
-| `--abo_delay` | Minimum number of ACTIVATEs between two consecutive ALERTs (0 to 3) | `0` |
+| `--rfmabo` | RFM ABO value (1, 2, or 4); sets alert duration and ABO delay. Based on MR71:OP[1:0] | `4` |
 | `--trfcrfm` | tRFC RFM time duration consumed when RFM is issued (use '0' for no time consumption) | `410ns` |
 | `--runtime` | Total simulation runtime | `32ms` |
 
@@ -123,7 +122,7 @@ Threshold (>):      1000
 tRFC per RFM:       410.000 ns
 RFM ABO:            4
 ISOC:               0
-ABO Delay:          0
+ABO Delay:          4
 RandReset:          0
 ALERT servicing duration: 1.640 us (RFM ABO × tRFC per RFM)
 
@@ -164,5 +163,5 @@ rows,trc,threshold,isoc,abo_delay,rfmabo,rfmfreqmin,rfmfreqmax,trfcrfm,runtime,R
 - **Time Units**: Supports ns (nanoseconds), us (microseconds), ms (milliseconds), s (seconds)
 - **RFM Types**: Both proactive (windowed) and reactive (alert-based) RFMs are counted
 - **CSV Format**: Designed for easy parameter sweep analysis and data processing
-- **Consecutive ALERTs**: Two ALERTs are considered *consecutive* when the gap between them (end of previous ALERT to start of next ALERT) equals exactly `(isoc + abo_delay) × tRC`. This accounts for the ISOC activations that occur before the ALERT and the mandatory ABO delay activations that occur after the ALERT. When both `isoc=0` and `abo_delay=0`, consecutive means zero gap (i.e., one ALERT fires immediately after the previous one ends).
+- **Consecutive ALERTs**: Two ALERTs are considered *consecutive* when the gap between them (end of previous ALERT to start of next ALERT) equals exactly `(isoc + abo_delay) × tRC`. The `abo_delay` is derived from `rfmabo` (both set by MR71:OP[1:0]). This accounts for the ISOC activations that occur before the ALERT and the mandatory ABO delay activations that occur after the ALERT.
 - **Worst-case attack**: The `feinting` workload represents the worst-case, as it has the potential to create the longest sequence of consecutive ALERTs.
