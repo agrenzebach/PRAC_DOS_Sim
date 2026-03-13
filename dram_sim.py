@@ -32,10 +32,10 @@ Inputs (report mode):
 Inputs (explore mode):
 - --trc            tRC per ACTIVATE (e.g., '45ns', '3.2us', '64ms', '0.001s').
 - --tfaw           tFAW timing constraint for 4 activates window (e.g., '20ns', '25ns'). Default is 20ns.
-- --rfmabo         Number of RFMs issued in response to ABO.
+- --rfmabo         RFM ABO value (1, 2, or 4); based on MR71:OP[1:0].
+                   Sets both the number of reactive RFMs per ALERT and abo_delay.
 - --trfcrfm        tRFC RFM time duration consumed when RFM is issued (e.g., '100ns', '1us'). Use '0' for no time consumption.
 - --isoc           Number of ACTIVATEs issued after alert but before reactive RFMs (default 0).
-- --abo_delay      ABO delay value (0 to 3). Default is 0.
 - --runtime        Total simulation runtime (default 32 ms).
 
 Notes:
@@ -83,8 +83,8 @@ class DRAMSimulator:
             raise ValueError("tRC must be > 0")
         if threshold < 0:
             raise ValueError("threshold must be >= 0")
-        if rfmabo < 0:
-            raise ValueError("rfmabo must be >= 0")
+        if rfmabo not in (1, 2, 4):
+            raise ValueError("rfmabo must be 1, 2, or 4 (MR71:OP[1:0])")
         if runtime_s <= 0:
             raise ValueError("runtime must be > 0")
         if rfm_freq_min_s < 0:
@@ -105,10 +105,7 @@ class DRAMSimulator:
             raise ValueError("randreset must be >= 0")
         if randreset > threshold:
             raise ValueError("randreset must be <= threshold")
-        if abo_delay < 0 or abo_delay > 3:
-            raise ValueError("abo_delay must be between 0 and 3")
-
-        # Parameters
+        # Parameters (abo_delay == rfmabo, both from MR71:OP[1:0])
         self.rows = rows
         self.trc_s = trc_s
         self.threshold = threshold

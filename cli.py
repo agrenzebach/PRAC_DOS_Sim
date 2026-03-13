@@ -70,7 +70,7 @@ def _build_arg_parser():
     )
     explore.add_argument(
         "--rfmabo", type=int, required=True,
-        help="RFM ABO multiplier; alert duration = rfmabo × trfcrfm."
+        help="RFM ABO value (1, 2, or 4); sets both alert duration (rfmabo × trfcrfm) and ABO delay. Based on MR71:OP[1:0]."
     )
     explore.add_argument(
         "--isoc", type=int, default=0,
@@ -88,10 +88,6 @@ def _build_arg_parser():
         "--wkld", type=str, default="rr",
         metavar="{rr,feinting,mixed:<feint_pct>}",
         help="Workload type: 'rr' (round-robin), 'feinting', or 'mixed:<feint_pct>' (e.g., 'mixed:10' for 10%% feinting). Default is 'rr'."
-    )
-    explore.add_argument(
-        "--abo_delay", type=int, default=0,
-        help="Minimum number of ACTIVATEs between two consecutive ALERTs (0 to 3). Default is 0."
     )
     explore.add_argument("--runtime", type=str, default="128ms", help="Total simulation runtime. Default is 128ms.")
     explore.add_argument(
@@ -199,7 +195,6 @@ def parse_and_validate_args(argv=None):
         runtime_str = config.refw
         isoc = getattr(config, 'isoc', 0)
         randreset = args.randreset
-        abo_delay = getattr(config, 'abo_delay', 0)
     else:  # explore mode
         trc_str = args.trc
         tfaw_str = args.tfaw
@@ -208,7 +203,9 @@ def parse_and_validate_args(argv=None):
         runtime_str = args.runtime
         isoc = args.isoc
         randreset = args.randreset
-        abo_delay = args.abo_delay
+
+    # abo_delay is always equal to rfmabo (both derived from MR71:OP[1:0])
+    abo_delay = rfmabo
 
     rfmfreqmin_str = args.rfmfreqmin
     rfmfreqmax_str = args.rfmfreqmax
@@ -224,9 +221,9 @@ def parse_and_validate_args(argv=None):
         print(f"Error: {e}", file=sys.stderr)
         return 2
 
-    # Validate abo_delay range
-    if abo_delay < 0 or abo_delay > 3:
-        print(f"Error: abo_delay must be between 0 and 3, got {abo_delay}", file=sys.stderr)
+    # Validate rfmabo: must be 1, 2, or 4 (MR71:OP[1:0])
+    if rfmabo not in (1, 2, 4):
+        print(f"Error: rfmabo must be 1, 2, or 4 (MR71:OP[1:0]), got {rfmabo}", file=sys.stderr)
         return 2
 
     # Validate RFM frequency range
