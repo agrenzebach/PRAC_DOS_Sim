@@ -366,7 +366,7 @@ class DRAMSimulator:
             if not self.active_rows:
                 return
             active_row_counters = [(self.counters[r], r) for r in self.active_rows]
-            active_row_counters.sort(reverse=True, key=lambda x: x[0])
+            active_row_counters.sort(reverse=True, key=lambda x: (x[0], -x[1]))
             for i in range(self.rfmabo):
                 if not active_row_counters:
                     break
@@ -379,7 +379,7 @@ class DRAMSimulator:
         else:
             # Round-robin: operate on all rows
             all_rows = [(self.counters[r], r) for r in range(self.rows)]
-            all_rows.sort(reverse=True, key=lambda x: x[0])
+            all_rows.sort(reverse=True, key=lambda x: (x[0], -x[1]))
             for i in range(self.rfmabo):
                 target_row = all_rows[i % len(all_rows)][1]
                 self.counters[target_row] = random.randint(0, self.randreset)
