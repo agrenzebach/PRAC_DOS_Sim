@@ -287,7 +287,7 @@ class DRAMSimulator:
 
     def _handle_isoc_and_alert(self, triggering_row: int):
         """Issue ISOC activates first (consuming tRC each), then ALERT with reactive RFMs, with potential re-alerting."""
-        isoc_activated_rows = []  # Track rows activated by ISOC
+        isoc_activated_rows = set()  # Track rows activated by ISOC
         
         # Issue ISOC activates BEFORE the ALERT (each consumes tRC)
         for _ in range(self.isoc):
@@ -315,7 +315,7 @@ class DRAMSimulator:
                 self.activate_timestamps.pop(0)
             self.time_s += self.trc_s
             
-            isoc_activated_rows.append(row)
+            isoc_activated_rows.add(row)
         
         # ALERT fires: consume alert duration (GLOBAL STALL) and issue RFMs
         remaining = self.runtime_s - self.time_s
@@ -349,7 +349,7 @@ class DRAMSimulator:
             if len(self.activate_timestamps) > 4:
                 self.activate_timestamps.pop(0)
             self.time_s += self.trc_s
-            isoc_activated_rows.append(row)
+            isoc_activated_rows.add(row)
 
         # Check which ISOC-activated rows still exceed threshold after RFMs
         re_alert_rows = [r for r in isoc_activated_rows if self.counters[r] > self.threshold]
