@@ -286,80 +286,87 @@ class DRAMSimulator:
         return None
 
     def _handle_isoc_and_alert(self, triggering_row: int):
-        """Issue ISOC activates first (consuming tRC each), then ALERT with reactive RFMs, with potential re-alerting."""
-        isoc_activated_rows = set()  # Track rows activated by ISOC
+        """Issue ISOC activates first (consuming tRC each), then ALERT with reactive RFMs, with potential re-alerting.
         
-        # Issue ISOC activates BEFORE the ALERT (each consumes tRC)
-        for _ in range(self.isoc):
-            # Check if we have enough time for another activate
-            if self.time_s + self.trc_s > self.runtime_s:
-                break
-            
-            # Move to next row
-            self.row_index = (self.row_index + 1) % self.rows
-            if self.wkld != "rr":
-                row = self._next_active_row()
-                if row is None:
-                    break
-            else:
-                row = self.row_index
-            
-            # ACTIVATE current row (consumes tRC)
-            self.counters[row] += 1
-            self.total_activations_per_row[row] += 1
-            self.total_activations += 1
-            # Record activate timestamp for tFAW tracking
-            self.activate_timestamps.append(self.time_s)
-            # Keep only last 4 timestamps for rolling window
-            if len(self.activate_timestamps) > 4:
-                self.activate_timestamps.pop(0)
-            self.time_s += self.trc_s
-            
-            isoc_activated_rows.add(row)
-        
-        # ALERT fires: consume alert duration (GLOBAL STALL) and issue RFMs
-        remaining = self.runtime_s - self.time_s
-        if remaining > 0.0:
-            self.alert_timestamps.append(self.time_s)  # Record when ALERT started
-            consume = min(self.alert_duration_s, remaining)
-            self.alerts_issued[triggering_row] += 1
-            self.total_alert_time_s[triggering_row] += consume
-            self.time_s += consume
-        
-        # Issue rfmabo number of RFMs targeting highest counter rows
-        self._issue_alert_rfms()
-        
-        # Issue abo_delay ACTIVATEs after ALERT+RFMs (mandatory delay before next ALERT)
-        for _ in range(self.abo_delay):
-            if self.time_s + self.trc_s > self.runtime_s:
-                break
-            self.row_index = (self.row_index + 1) % self.rows
-            if self.wkld != "rr":
-                row = self._next_active_row()
-                if row is None:
-                    break
-            else:
-                row = self.row_index
-            self.counters[row] += 1
-            self.total_activations_per_row[row] += 1
-            self.total_activations += 1
-            # Record activate timestamp for tFAW tracking
-            self.activate_timestamps.append(self.time_s)
-            # Keep only last 4 timestamps for rolling window
-            if len(self.activate_timestamps) > 4:
-                self.activate_timestamps.pop(0)
-            self.time_s += self.trc_s
-            isoc_activated_rows.add(row)
+        Uses an iterative queue (set) instead of recursion so that a row already pending
+        an alert is never queued a second time (set deduplication), avoiding double-alerts.
+        """
+        pending = {triggering_row}
 
-        # Check which ISOC-activated rows still exceed threshold after RFMs
-        re_alert_rows = [r for r in isoc_activated_rows if self.counters[r] > self.threshold]
-        
-        # Fire re-alerts for rows still above threshold
-        for re_alert_row in re_alert_rows:
-            if self.alert_duration_s > 0.0:
-                self._handle_isoc_and_alert(re_alert_row)
+        while pending:
+            current_row: int = pending.pop()
+            isoc_activated_rows = set()  # Track rows activated by ISOC/ABO-delay this iteration
+
+            # Issue ISOC activates BEFORE the ALERT (each consumes tRC)
+            for _ in range(self.isoc):
+                # Check if we have enough time for another activate
+                if self.time_s + self.trc_s > self.runtime_s:
+                    break
+
+                # Move to next row
+                self.row_index = (self.row_index + 1) % self.rows
+                if self.wkld != "rr":
+                    row = self._next_active_row()
+                    if row is None:
+                        break
+                else:
+                    row = self.row_index
+
+                # ACTIVATE current row (consumes tRC)
+                self.counters[row] += 1
+                self.total_activations_per_row[row] += 1
+                self.total_activations += 1
+                # Record activate timestamp for tFAW tracking
+                self.activate_timestamps.append(self.time_s)
+                # Keep only last 4 timestamps for rolling window
+                if len(self.activate_timestamps) > 4:
+                    self.activate_timestamps.pop(0)
+                self.time_s += self.trc_s
+
+                isoc_activated_rows.add(row)
+
+            # ALERT fires: consume alert duration (GLOBAL STALL) and issue RFMs
+            remaining = self.runtime_s - self.time_s
+            if remaining > 0.0:
+                self.alert_timestamps.append(self.time_s)  # Record when ALERT started
+                consume = min(self.alert_duration_s, remaining)
+                self.alerts_issued[current_row] += 1
+                self.total_alert_time_s[current_row] += consume
+                self.time_s += consume
+
+            # Issue rfmabo number of RFMs targeting highest counter rows
+            self._issue_reactive_rfms()
+
+            # Issue abo_delay ACTIVATEs after ALERT+RFMs (mandatory delay before next ALERT)
+            for _ in range(self.abo_delay):
+                if self.time_s + self.trc_s > self.runtime_s:
+                    break
+                self.row_index = (self.row_index + 1) % self.rows
+                if self.wkld != "rr":
+                    row = self._next_active_row()
+                    if row is None:
+                        break
+                else:
+                    row = self.row_index
+                self.counters[row] += 1
+                self.total_activations_per_row[row] += 1
+                self.total_activations += 1
+                # Record activate timestamp for tFAW tracking
+                self.activate_timestamps.append(self.time_s)
+                # Keep only last 4 timestamps for rolling window
+                if len(self.activate_timestamps) > 4:
+                    self.activate_timestamps.pop(0)
+                self.time_s += self.trc_s
+                isoc_activated_rows.add(row)
+
+            # Queue re-alerts for rows still above threshold.
+            # Using a set for pending means adding an already-queued row is a no-op,
+            # preventing a row from being alerted twice in the same cascade.
+            for r in isoc_activated_rows:
+                if self.counters[r] > self.threshold:
+                    pending.add(r)
     
-    def _issue_alert_rfms(self):
+    def _issue_reactive_rfms(self):
         """Issue rfmabo number of RFMs targeting rows with highest counters during alert."""
         if self.wkld != "rr":
             # Feinting/mixed: operate on active rows only
