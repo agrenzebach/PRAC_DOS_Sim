@@ -491,28 +491,23 @@ class DRAMSimulator:
         lines.append(f"Proactive RFM time: {human_time(self.total_rfm_time_s)}")
 
         # ALERT statistics
-        if len(self.alert_timestamps) >= 2:
-            gaps = [self.alert_timestamps[i+1] - self.alert_timestamps[i] - self.alert_duration_s
-                   for i in range(len(self.alert_timestamps) - 1)]
-            # Two ALERTs are consecutive when separated by exactly (isoc + abo_delay) activations
-            consec_gap = (self.isoc + self.abo_delay) * self.trc_s
-            longest_consec_count = 1
-            current_consec_count = 1
-            for g in gaps:
-                if is_float_zero(g - consec_gap):
-                    current_consec_count += 1
-                    longest_consec_count = max(longest_consec_count, current_consec_count)
-                else:
-                    current_consec_count = 1  # Reset sequence
+        gaps = [self.alert_timestamps[i+1] - self.alert_timestamps[i] - self.alert_duration_s
+                for i in range(len(self.alert_timestamps) - 1)]
+        # Two ALERTs are consecutive when separated by exactly (isoc + abo_delay) activations
+        consec_gap = (self.isoc + self.abo_delay) * self.trc_s
+        longest_consec_count = 1 if self.alert_timestamps else 0
+        current_consec_count = 1 if self.alert_timestamps else 0
+        for g in gaps:
+            if is_float_zero(g - consec_gap):
+                current_consec_count += 1
+                longest_consec_count = max(longest_consec_count, current_consec_count)
+            else:
+                current_consec_count = 1  # Reset sequence
 
-            lines.append("")
-            lines.append(f"Total ALERTs:       {len(self.alert_timestamps)}")
-            lines.append(f"Total ALERT servicing time: {human_time(total_alert)}")
-            lines.append(f"Longest seq. consecutive ALERTs: {longest_consec_count}")
-        elif len(self.alert_timestamps) == 1:
-            lines.append("")
-            lines.append(f"Total ALERTs:       1")
-            lines.append(f"Total ALERT servicing time: {human_time(total_alert)}")
+        lines.append("")
+        lines.append(f"Total ALERTs:       {len(self.alert_timestamps)}")
+        lines.append(f"Total ALERT servicing time: {human_time(total_alert)}")
+        lines.append(f"Longest seq. consecutive ALERTs: {longest_consec_count}")
 
         # Per-row metrics
         lines.append("")
